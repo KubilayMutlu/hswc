@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { fetchWorldCupMatches, fetchMatchScore, mapApiMatchToSupabase, sleep } from '@/lib/footballApi'
 import type { Match } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { Plus, CheckCircle } from 'lucide-react'
+import { Plus, CheckCircle, RefreshCw, Download, AlertCircle, Info } from 'lucide-react'
+
+type StatusMsg = { type: 'success' | 'error' | 'info'; message: string }
 
 export default function AdminPage() {
   const [matches, setMatches] = useState<Match[]>([])
@@ -14,6 +17,10 @@ export default function AdminPage() {
     phase: '', team_home: '', team_away: '', flag_home: '', flag_away: '', kickoff_at: '',
   })
   const [addingMatch, setAddingMatch] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [updatingScores, setUpdatingScores] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<StatusMsg | null>(null)
+  const [updateProgress, setUpdateProgress] = useState('')
 
   useEffect(() => {
     fetchMatches()
@@ -25,6 +32,115 @@ export default function AdminPage() {
     setLoading(false)
   }
 
+  async function handleSyncMatches() {
+    setSyncing(true)
+    setSyncStatus(null)
+    try {
+      const apiMatches = await fetchWorldCupMatches()
+
+      // Count existing external IDs
+      const { data: existing } = await supabase.from('matches').select('external_id').not('external_id', 'is', null)
+      const existingIds = new Set(existing?.map(m => m.external_id) ?? [])
+
+      let imported = 0, updated = 0
+      const toUpsert = apiMatches.map((m: any) => {
+        if (existingIds.has(m.id)) updated++
+        else imported++
+        return mapApiMatchToSupabase(m)
+      })
+
+      const { error } = await supabase
+        .from('matches')
+        .upsert(toUpsert, { onConflict: 'external_id' })
+
+      if (error) throw new Error(error.message)
+
+      await fetchMatches()
+      setSyncStatus({ type: 'success', message: `✓ ${imported} matchs importés, ${updated} mis à jour` })
+    } catch (err) {
+      setSyncStatus({ type: 'error', message: `Erreur sync: ${err instanceof Error ? err.message : 'Inconnue'}` })
+    }
+    setSyncing(false)
+  }
+
+  async function handleUpdateScores() {
+    setUpdatingScores(true)
+    setSyncStatus(null)
+    setUpdateProgress('')
+
+    try {
+      const now = new Date().toISOString()
+      const { data: matchesToUpdate } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('is_finished', false)
+        .not('external_id', 'is', null)
+        .lt('kickoff_at', now)
+
+      if (!matchesToUpdate || matchesToUpdate.length === 0) {
+        setSyncStatus({ type: 'info', message: 'Aucun match à mettre à jour pour l\'instant.' })
+        setUpdatingScores(false)
+        return
+      }
+
+      let processed = 0, totalPoints = 0
+
+      for (let i = 0; i < matchesToUpdate.length; i++) {
+        const match = matchesToUpdate[i]
+        setUpdateProgress(`${i + 1}/${matchesToUpdate.length}`)
+
+        await sleep(100)
+
+        try {
+          const scoreData = await fetchMatchScore(match.external_id)
+
+          if (scoreData.status === 'FINISHED' && scoreData.home !== null && scoreData.away !== null) {
+            const scoreHome = scoreData.home
+            const scoreAway = scoreData.away
+            const actualWinner = scoreHome > scoreAway ? 'home' : scoreAway > scoreHome ? 'away' : 'draw'
+
+            await supabase.from('matches').update({
+              score_home: scoreHome,
+              score_away: scoreAway,
+              is_finished: true,
+              status: 'FINISHED',
+            }).eq('id', match.id)
+
+            const { data: preds } = await supabase
+              .from('predictions')
+              .select('*')
+              .eq('match_id', match.id)
+
+            if (preds) {
+              for (const pred of preds) {
+                const exactScore = pred.predicted_home === scoreHome && pred.predicted_away === scoreAway
+                const correctWinner = pred.predicted_winner === actualWinner
+                const points = exactScore ? 8 : correctWinner ? 3 : 0
+                totalPoints += points
+                await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
+              }
+            }
+            processed++
+          }
+        } catch (e) {
+          console.error(`Échec mise à jour match ${match.external_id}:`, e)
+        }
+      }
+
+      await fetchMatches()
+      setUpdateProgress('')
+      setSyncStatus({
+        type: 'success',
+        message: `✓ ${processed} match${processed > 1 ? 's' : ''} terminé${processed > 1 ? 's' : ''} traité${processed > 1 ? 's' : ''}, ${totalPoints} pts attribués`,
+      })
+    } catch (err) {
+      setSyncStatus({ type: 'error', message: `Erreur: ${err instanceof Error ? err.message : 'Inconnue'}` })
+    }
+
+    setUpdatingScores(false)
+    setUpdateProgress('')
+  }
+
   async function handleFinishMatch(match: Match) {
     const input = scoreInputs[match.id]
     if (!input || input.home === '' || input.away === '') return
@@ -34,26 +150,19 @@ export default function AdminPage() {
     const scoreAway = parseInt(input.away)
     const actualWinner = scoreHome > scoreAway ? 'home' : scoreAway > scoreHome ? 'away' : 'draw'
 
-    // Update match
     await supabase.from('matches').update({
       score_home: scoreHome,
       score_away: scoreAway,
       is_finished: true,
+      status: 'FINISHED',
     }).eq('id', match.id)
 
-    // Fetch all predictions for this match
-    const { data: preds } = await supabase
-      .from('predictions')
-      .select('*')
-      .eq('match_id', match.id)
-
+    const { data: preds } = await supabase.from('predictions').select('*').eq('match_id', match.id)
     if (preds) {
       for (const pred of preds) {
-        let points = 0
-        const correctWinner = pred.predicted_winner === actualWinner
         const exactScore = pred.predicted_home === scoreHome && pred.predicted_away === scoreAway
-        if (exactScore) points = 8
-        else if (correctWinner) points = 3
+        const correctWinner = pred.predicted_winner === actualWinner
+        const points = exactScore ? 8 : correctWinner ? 3 : 0
         await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
       }
     }
@@ -72,6 +181,7 @@ export default function AdminPage() {
       flag_away: newMatch.flag_away,
       kickoff_at: new Date(newMatch.kickoff_at).toISOString(),
       is_finished: false,
+      status: 'SCHEDULED',
     }])
     if (!error) {
       setNewMatch({ phase: '', team_home: '', team_away: '', flag_home: '', flag_away: '', kickoff_at: '' })
@@ -88,6 +198,18 @@ export default function AdminPage() {
     return <div className="flex items-center justify-center py-20"><p className="text-gray-400">Chargement…</p></div>
   }
 
+  const statusColors = {
+    success: 'bg-green-50 border-green-200 text-green-800',
+    error: 'bg-red-50 border-red-200 text-red-800',
+    info: 'bg-blue-50 border-blue-200 text-blue-800',
+  }
+
+  const statusIcon = {
+    success: <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />,
+    error: <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />,
+    info: <Info className="w-4 h-4 text-blue-500 shrink-0" />,
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
@@ -97,9 +219,45 @@ export default function AdminPage() {
         <h1 className="text-lg font-bold text-dark">Panel Admin</h1>
       </div>
 
+      {/* API Sync section */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="font-semibold text-dark mb-1 flex items-center gap-2">
+          <RefreshCw className="w-4 h-4" /> Synchronisation API Football
+        </h2>
+        <p className="text-xs text-gray-400 mb-4">Données via football-data.org — WC 2026</p>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <button
+            onClick={handleSyncMatches}
+            disabled={syncing || updatingScores}
+            className="flex-1 flex items-center justify-center gap-2 bg-dark text-white rounded-xl py-2.5 font-semibold text-sm hover:bg-dark/90 transition disabled:opacity-50"
+          >
+            <Download className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
+            {syncing ? 'Synchronisation…' : 'Synchroniser les matchs'}
+          </button>
+          <button
+            onClick={handleUpdateScores}
+            disabled={syncing || updatingScores}
+            className="flex-1 flex items-center justify-center gap-2 bg-primary text-white rounded-xl py-2.5 font-semibold text-sm hover:bg-primary/90 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${updatingScores ? 'animate-spin' : ''}`} />
+            {updatingScores
+              ? updateProgress ? `Mise à jour… (${updateProgress})` : 'Mise à jour…'
+              : 'Mettre à jour les scores'}
+          </button>
+        </div>
+
+        {syncStatus && (
+          <div className={`mt-3 flex items-center gap-2 text-sm border rounded-lg px-3 py-2 ${statusColors[syncStatus.type]}`}>
+            {statusIcon[syncStatus.type]}
+            <span>{syncStatus.message}</span>
+          </div>
+        )}
+      </div>
+
       {/* Add match form */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h2 className="font-semibold text-dark mb-4 flex items-center gap-2"><Plus className="w-4 h-4" /> Ajouter un match</h2>
+        <h2 className="font-semibold text-dark mb-4 flex items-center gap-2"><Plus className="w-4 h-4" /> Ajouter un match manuellement</h2>
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label className="text-xs font-medium text-gray-500 mb-1 block">Phase</label>
@@ -146,7 +304,12 @@ export default function AdminPage() {
         {matches.map(match => (
           <div key={match.id} className={`bg-white rounded-xl shadow-sm border p-4 ${match.is_finished ? 'border-green-100' : 'border-gray-100'}`}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-400">{match.phase}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-semibold text-gray-400">{match.phase}</span>
+                {match.status && match.status !== 'SCHEDULED' && match.status !== 'FINISHED' && (
+                  <span className="text-xs bg-yellow-100 text-yellow-700 font-semibold px-1.5 py-0.5 rounded-full">{match.status}</span>
+                )}
+              </div>
               <div className="flex items-center gap-1.5">
                 {match.is_finished && <CheckCircle className="w-4 h-4 text-green-500" />}
                 <span className="text-xs text-gray-400">{format(new Date(match.kickoff_at), 'd MMM HH:mm', { locale: fr })}</span>
@@ -197,7 +360,7 @@ export default function AdminPage() {
 
         {matches.length === 0 && (
           <div className="bg-white rounded-xl p-8 text-center text-gray-400 text-sm shadow-sm border border-gray-100">
-            Aucun match. Ajoute-en un ci-dessus.
+            Aucun match. Utilise la sync API ou ajoute-en un manuellement.
           </div>
         )}
       </div>

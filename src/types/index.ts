@@ -16,6 +16,8 @@ export interface Match {
   score_home: number | null
   score_away: number | null
   is_finished: boolean
+  external_id?: number | null
+  status?: string | null
 }
 
 export interface Prediction {
