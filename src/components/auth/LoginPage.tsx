@@ -67,25 +67,21 @@ export default function LoginPage({ onSignupSuccess }: LoginPageProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#1A1040] via-[#0B0E1A] to-[#0D1829] flex items-center justify-center p-4">
-      {/* Ambient glow blobs */}
-      <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/8 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-[#F5B942]/5 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-sm relative">
+      <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary mb-4 shadow-lg shadow-primary/40">
-            <span className="text-white text-2xl font-black">HS</span>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-[#4F46E5] mb-4 shadow-lg shadow-primary/40 text-3xl">
+            ⚽
           </div>
           <h1 className="text-white text-2xl font-bold tracking-tight">HireSweet World Cup</h1>
-          <p className="text-white/40 mt-1 text-sm">Édition 2026 ⚽</p>
+          <p className="text-white/40 mt-1 text-sm">Édition 2026</p>
         </div>
 
-        <div className="glass-card rounded-2xl p-6 shadow-2xl shadow-black/40">
+        <div className="bg-white rounded-2xl p-6 shadow-2xl">
           {signupConfirm ? (
             <div className="text-center py-4">
               <div className="text-3xl mb-3">📧</div>
-              <h2 className="text-white text-lg font-semibold mb-2">Vérifie ton email</h2>
-              <p className="text-white/50 text-sm">Un lien de confirmation t'a été envoyé à <strong className="text-white/80">{email}</strong>.</p>
+              <h2 className="text-gray-900 text-lg font-semibold mb-2">Vérifie ton email</h2>
+              <p className="text-gray-500 text-sm">Un lien de confirmation t'a été envoyé à <strong className="text-gray-700">{email}</strong>.</p>
               <button
                 onClick={() => { setSignupConfirm(false); setMode('login') }}
                 className="mt-4 text-sm text-primary hover:underline"
@@ -95,17 +91,17 @@ export default function LoginPage({ onSignupSuccess }: LoginPageProps) {
             </div>
           ) : (
             <>
-              <h2 className="text-white text-lg font-semibold mb-1">
+              <h2 className="text-gray-900 text-lg font-semibold mb-1">
                 {isLogin ? 'Connexion' : 'Créer un compte'}
               </h2>
-              <p className="text-white/40 text-sm mb-5">
+              <p className="text-gray-500 text-sm mb-5">
                 {isLogin
                   ? 'Entre tes identifiants pour accéder aux pronostics.'
                   : 'Rejoins HireSweet World Cup 2026.'}
               </p>
 
               {error && (
-                <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-4">
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-sm mb-4">
                   {error}
                 </div>
               )}
@@ -113,12 +109,12 @@ export default function LoginPage({ onSignupSuccess }: LoginPageProps) {
               <form onSubmit={isLogin ? handleLogin : handleSignup} className="space-y-4">
                 {!isLogin && (
                   <div>
-                    <label className="block text-sm font-medium text-white/60 mb-1.5">Prénom et nom</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Prénom et nom</label>
                     <input
                       type="text"
                       value={fullName}
                       onChange={e => setFullName(e.target.value)}
-                      className="input-dark"
+                      className="input-field"
                       placeholder="Prénom Nom"
                       required
                       autoComplete="name"
@@ -126,24 +122,24 @@ export default function LoginPage({ onSignupSuccess }: LoginPageProps) {
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm font-medium text-white/60 mb-1.5">Email</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Email</label>
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    className="input-dark"
+                    className="input-field"
                     placeholder="prenom@hiresweet.com"
                     required
                     autoComplete="email"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-white/60 mb-1.5">Mot de passe</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Mot de passe</label>
                   <input
                     type="password"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    className="input-dark"
+                    className="input-field"
                     placeholder="••••••••"
                     required
                     minLength={6}
@@ -173,7 +169,7 @@ export default function LoginPage({ onSignupSuccess }: LoginPageProps) {
                 ) : (
                   <button
                     onClick={() => { setMode('login'); setError(null) }}
-                    className="text-sm text-white/40 hover:text-white/70 transition"
+                    className="text-sm text-gray-500 hover:text-gray-800 transition"
                   >
                     ← Retour à la connexion
                   </button>

@@ -15,7 +15,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   return (
-    <nav className="bg-dark border-b border-white/8">
+    <nav className="bg-dark border-b border-white/10">
       <div className="max-w-5xl mx-auto px-4">
         <div className="flex overflow-x-auto scrollbar-hide">
           {tabs.map(tab => (
@@ -25,7 +25,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               className={`flex items-center gap-1.5 px-4 py-3.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 activeTab === tab.id
                   ? 'border-primary text-white'
-                  : 'border-transparent text-white/40 hover:text-white/70 hover:border-white/20'
+                  : 'border-transparent text-white/50 hover:text-white/80 hover:border-white/20'
               }`}
             >
               <span>{tab.icon}</span>
