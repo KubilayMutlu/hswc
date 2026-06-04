@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import { fetchWorldCupMatches, fetchMatchScore, mapApiMatchToSupabase, sleep } from '@/lib/footballApi'
+import { fetchWorldCupMatches, fetchMatchScore, mapApiMatchToSupabase, sleep, getCountryFlag } from '@/lib/footballApi'
 import type { Match } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
@@ -30,6 +30,8 @@ export default function AdminPage() {
     phase: '', team_home: '', team_away: '', flag_home: '', flag_away: '', kickoff_at: '',
   })
   const [addingMatch, setAddingMatch] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
+  const [addSuccess, setAddSuccess] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [updatingScores, setUpdatingScores] = useState(false)
   const [syncStatus, setSyncStatus] = useState<StatusMsg | null>(null)
@@ -182,18 +184,24 @@ export default function AdminPage() {
 
   async function handleAddMatch() {
     setAddingMatch(true)
+    setAddError(null)
+    setAddSuccess(false)
     const { error } = await supabase.from('matches').insert([{
       phase: newMatch.phase,
       team_home: newMatch.team_home,
       team_away: newMatch.team_away,
-      flag_home: newMatch.flag_home,
-      flag_away: newMatch.flag_away,
+      flag_home: newMatch.flag_home || getCountryFlag(newMatch.team_home),
+      flag_away: newMatch.flag_away || getCountryFlag(newMatch.team_away),
       kickoff_at: new Date(newMatch.kickoff_at).toISOString(),
       is_finished: false,
       status: 'SCHEDULED',
     }])
-    if (!error) {
+    if (error) {
+      setAddError(`Erreur : ${error.message}`)
+    } else {
       setNewMatch({ phase: '', team_home: '', team_away: '', flag_home: '', flag_away: '', kickoff_at: '' })
+      setAddSuccess(true)
+      setTimeout(() => setAddSuccess(false), 3000)
       await fetchMatches()
     }
     setAddingMatch(false)
@@ -278,26 +286,56 @@ export default function AdminPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Drapeau domicile (emoji)</label>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Équipe domicile</label>
+            <input
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="France"
+              value={newMatch.team_home}
+              onChange={e => setNewMatch(prev => ({ ...prev, team_home: e.target.value }))}
+              onBlur={e => {
+                const flag = getCountryFlag(e.target.value)
+                if (flag !== '🏳️') setNewMatch(prev => ({ ...prev, flag_home: flag }))
+              }}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Drapeau domicile (auto)</label>
             <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="🇫🇷" value={newMatch.flag_home} onChange={e => setNewMatch(prev => ({ ...prev, flag_home: e.target.value }))} />
           </div>
           <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Équipe domicile</label>
-            <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="France" value={newMatch.team_home} onChange={e => setNewMatch(prev => ({ ...prev, team_home: e.target.value }))} />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-500 mb-1 block">Drapeau extérieur (emoji)</label>
-            <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="🇧🇷" value={newMatch.flag_away} onChange={e => setNewMatch(prev => ({ ...prev, flag_away: e.target.value }))} />
-          </div>
-          <div>
             <label className="text-xs font-medium text-gray-500 mb-1 block">Équipe extérieure</label>
-            <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="Brésil" value={newMatch.team_away} onChange={e => setNewMatch(prev => ({ ...prev, team_away: e.target.value }))} />
+            <input
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              placeholder="Brésil"
+              value={newMatch.team_away}
+              onChange={e => setNewMatch(prev => ({ ...prev, team_away: e.target.value }))}
+              onBlur={e => {
+                const flag = getCountryFlag(e.target.value)
+                if (flag !== '🏳️') setNewMatch(prev => ({ ...prev, flag_away: flag }))
+              }}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Drapeau extérieur (auto)</label>
+            <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="🇧🇷" value={newMatch.flag_away} onChange={e => setNewMatch(prev => ({ ...prev, flag_away: e.target.value }))} />
           </div>
           <div className="col-span-2">
             <label className="text-xs font-medium text-gray-500 mb-1 block">Date et heure de coup d'envoi</label>
             <input type="datetime-local" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" value={newMatch.kickoff_at} onChange={e => setNewMatch(prev => ({ ...prev, kickoff_at: e.target.value }))} />
           </div>
         </div>
+        {addError && (
+          <div className="mt-3 flex items-center gap-2 text-sm border rounded-lg px-3 py-2 bg-red-50 border-red-200 text-red-800">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>{addError}</span>
+          </div>
+        )}
+        {addSuccess && (
+          <div className="mt-3 flex items-center gap-2 text-sm border rounded-lg px-3 py-2 bg-green-50 border-green-200 text-green-800">
+            <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+            <span>Match ajouté — visible dans Pronostics.</span>
+          </div>
+        )}
         <button
           onClick={handleAddMatch}
           disabled={addingMatch || !newMatch.phase || !newMatch.team_home || !newMatch.team_away || !newMatch.kickoff_at}
