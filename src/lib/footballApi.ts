@@ -1,10 +1,15 @@
-const BASE_URL = 'https://api.football-data.org/v4'
-
-function getHeaders() {
-  return { 'X-Auth-Token': import.meta.env.VITE_FOOTBALL_API_KEY }
-}
+import { supabase } from '@/lib/supabase'
 
 export const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+async function proxyFetch(path: string): Promise<any> {
+  const { data, error } = await supabase.functions.invoke('football-proxy', {
+    body: { path },
+  })
+  if (error) throw new Error(`football-proxy: ${error.message}`)
+  if (data?.error) throw new Error(`API error: ${data.error}`)
+  return data
+}
 
 const countryFlags: Record<string, string> = {
   // CONCACAF
@@ -84,16 +89,12 @@ export function mapApiMatchToSupabase(apiMatch: any) {
 }
 
 export async function fetchWorldCupMatches(): Promise<any[]> {
-  const res = await fetch(`${BASE_URL}/competitions/WC/matches`, { headers: getHeaders() })
-  if (!res.ok) throw new Error(`API football-data: ${res.status} ${res.statusText}`)
-  const data = await res.json()
+  const data = await proxyFetch('/v4/competitions/WC/matches')
   return data.matches ?? []
 }
 
 export async function fetchMatchScore(externalId: number): Promise<{ home: number | null; away: number | null; status: string }> {
-  const res = await fetch(`${BASE_URL}/matches/${externalId}`, { headers: getHeaders() })
-  if (!res.ok) throw new Error(`API football-data: ${res.status} ${res.statusText}`)
-  const data = await res.json()
+  const data = await proxyFetch(`/v4/matches/${externalId}`)
   return {
     home: data.score?.fullTime?.home ?? null,
     away: data.score?.fullTime?.away ?? null,
