@@ -20,16 +20,11 @@ function App() {
   const [showAdmin, setShowAdmin] = useState(false)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else setLoading(false)
-    })
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      if (session) fetchProfile(session.user.id)
-      else {
+      if (session) {
+        fetchProfile(session.user.id)
+      } else {
         setProfile(null)
         setLoading(false)
       }
@@ -39,11 +34,16 @@ function App() {
   }, [])
 
   async function fetchProfile(userId: string) {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single()
+      .maybeSingle()
+
+    if (error) {
+      console.error('[fetchProfile] Supabase error:', error.message, error.code)
+    }
+
     setProfile(data)
     setLoading(false)
   }
