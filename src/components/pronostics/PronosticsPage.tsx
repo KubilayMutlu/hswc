@@ -17,18 +17,23 @@ interface MatchWithPrediction extends Match {
   }
 }
 
+function deriveWinner(home: number, away: number): 'home' | 'away' | 'draw' {
+  if (home > away) return 'home'
+  if (away > home) return 'away'
+  return 'draw'
+}
+
 export default function PronosticsPage({ profile }: PronosticsPageProps) {
   const [matches, setMatches] = useState<MatchWithPrediction[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
-  const [inputs, setInputs] = useState<Record<string, { home: string; away: string; winner: string }>>({})
+  const [inputs, setInputs] = useState<Record<string, { home: string; away: string }>>({})
 
   useEffect(() => {
     fetchMatchesAndPredictions()
   }, [])
 
   async function fetchMatchesAndPredictions() {
-    const now = new Date().toISOString()
     const { data: matchesData } = await supabase
       .from('matches')
       .select('*')
@@ -44,26 +49,23 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
     const withPreds: MatchWithPrediction[] = matchesData.map(m => {
       const pred = preds?.find(p => p.match_id === m.id)
-      return { ...m, prediction: pred ? {
-        predicted_home: pred.predicted_home,
-        predicted_away: pred.predicted_away,
-        predicted_winner: pred.predicted_winner,
-      } : undefined }
+      return {
+        ...m,
+        prediction: pred ? {
+          predicted_home: pred.predicted_home,
+          predicted_away: pred.predicted_away,
+          predicted_winner: pred.predicted_winner,
+        } : undefined,
+      }
     })
 
     setMatches(withPreds)
 
-    const initInputs: Record<string, { home: string; away: string; winner: string }> = {}
+    const initInputs: Record<string, { home: string; away: string }> = {}
     withPreds.forEach(m => {
-      if (m.prediction) {
-        initInputs[m.id] = {
-          home: String(m.prediction.predicted_home),
-          away: String(m.prediction.predicted_away),
-          winner: m.prediction.predicted_winner,
-        }
-      } else {
-        initInputs[m.id] = { home: '', away: '', winner: '' }
-      }
+      initInputs[m.id] = m.prediction
+        ? { home: String(m.prediction.predicted_home), away: String(m.prediction.predicted_away) }
+        : { home: '', away: '' }
     })
     setInputs(initInputs)
     setLoading(false)
@@ -75,15 +77,18 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
   async function handleSave(match: MatchWithPrediction) {
     const input = inputs[match.id]
-    if (!input || input.home === '' || input.away === '' || !input.winner || !profile) return
+    if (!input || input.home === '' || input.away === '' || !profile) return
     setSaving(match.id)
+
+    const h = parseInt(input.home)
+    const a = parseInt(input.away)
 
     const payload = {
       user_id: profile.id,
       match_id: match.id,
-      predicted_home: parseInt(input.home),
-      predicted_away: parseInt(input.away),
-      predicted_winner: input.winner,
+      predicted_home: h,
+      predicted_away: a,
+      predicted_winner: deriveWinner(h, a),
       points_earned: 0,
     }
 
@@ -92,7 +97,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     setSaving(null)
   }
 
-  function setInput(matchId: string, field: 'home' | 'away' | 'winner', value: string) {
+  function setInput(matchId: string, field: 'home' | 'away', value: string) {
     setInputs(prev => ({ ...prev, [matchId]: { ...prev[matchId], [field]: value } }))
   }
 
@@ -121,14 +126,24 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
       {upcoming.length > 0 && (
         <div className="space-y-3">
           {upcoming.map(match => {
-            const input = inputs[match.id] || { home: '', away: '', winner: '' }
+            const input = inputs[match.id] || { home: '', away: '' }
             const isSaved = !!match.prediction
             const isDirty = match.prediction
               ? input.home !== String(match.prediction.predicted_home) ||
-                input.away !== String(match.prediction.predicted_away) ||
-                input.winner !== match.prediction.predicted_winner
-              : input.home !== '' || input.away !== '' || input.winner !== ''
-            const canSave = input.home !== '' && input.away !== '' && input.winner !== ''
+                input.away !== String(match.prediction.predicted_away)
+              : input.home !== '' || input.away !== ''
+            const canSave = input.home !== '' && input.away !== ''
+
+            const h = parseInt(input.home)
+            const a = parseInt(input.away)
+            const derivedWinner = canSave ? deriveWinner(h, a) : null
+            const winnerLabel = derivedWinner === 'home'
+              ? `Victoire ${match.team_home}`
+              : derivedWinner === 'away'
+              ? `Victoire ${match.team_away}`
+              : derivedWinner === 'draw'
+              ? 'Match nul'
+              : null
 
             return (
               <div key={match.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -140,8 +155,8 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                 </div>
 
                 <div className="px-5 py-4">
-                  {/* Teams row */}
-                  <div className="flex items-center gap-3 mb-4">
+                  {/* Teams + score inputs */}
+                  <div className="flex items-center gap-3 mb-3">
                     <div className="flex-1 flex items-center gap-2">
                       <span className="text-2xl">{match.flag_home}</span>
                       <span className="font-semibold text-dark text-sm">{match.team_home}</span>
@@ -173,30 +188,11 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                     </div>
                   </div>
 
-                  {/* Winner buttons */}
-                  <div className="flex gap-2 mb-4">
-                    {[
-                      { val: 'home', label: match.team_home },
-                      { val: 'draw', label: 'Match nul' },
-                      { val: 'away', label: match.team_away },
-                    ].map(opt => (
-                      <button
-                        key={opt.val}
-                        onClick={() => setInput(match.id, 'winner', opt.val)}
-                        className={`flex-1 py-2 rounded-lg text-xs font-semibold border-2 transition ${
-                          input.winner === opt.val
-                            ? 'border-primary bg-primary text-white'
-                            : 'border-gray-200 text-gray-600 hover:border-primary/40 hover:text-primary'
-                        }`}
-                      >
-                        {opt.val === 'draw' ? '🤝' : input.winner === opt.val ? '✓' : ''} {opt.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Points hint + Save button */}
+                  {/* Derived winner hint + Save button */}
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-gray-400">+3 pts vainqueur · +5 pts bonus score exact</span>
+                    <span className={`text-xs font-medium transition-all ${winnerLabel ? 'text-primary' : 'text-gray-300'}`}>
+                      {winnerLabel ? `→ ${winnerLabel}` : '→ Saisir un score'}
+                    </span>
                     <button
                       onClick={() => handleSave(match)}
                       disabled={!canSave || saving === match.id}
@@ -232,9 +228,13 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                 <span className="font-medium text-sm text-dark">{match.team_away}</span>
                 <span className="text-xl">{match.flag_away}</span>
               </div>
-              <div className="flex items-center gap-1.5 text-xs text-gray-400">
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                {match.prediction && (
+                  <span className="font-mono font-semibold">
+                    {match.prediction.predicted_home}–{match.prediction.predicted_away}
+                  </span>
+                )}
                 <Lock className="w-3 h-3" />
-                <span>Verrouillé</span>
               </div>
             </div>
           ))}
