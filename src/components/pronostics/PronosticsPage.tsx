@@ -112,7 +112,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-bold text-dark mb-1">Mes pronostics</h2>
-        <p className="text-sm text-gray-500">+3 pts vainqueur · +8 pts score exact</p>
+        <p className="text-sm text-gray-500">Score exact : 7 pts · Bon résultat + partiel : 4 pts · Bon résultat : 3 pts · Partiel : 1 pt</p>
       </div>
 
       {upcoming.length === 0 && locked.length === 0 && (

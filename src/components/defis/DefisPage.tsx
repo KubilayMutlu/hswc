@@ -65,7 +65,7 @@ export default function DefisPage() {
     )
 
     const sniper = bestUser(uid =>
-      predictions.filter(p => p.user_id === uid && p.points_earned >= 8).length
+      predictions.filter(p => p.user_id === uid && p.points_earned >= 7).length
     )
 
     const serie = bestUser(uid => {

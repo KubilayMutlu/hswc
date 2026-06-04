@@ -42,7 +42,7 @@ export default function ClassementPage({ profile }: ClassementPageProps) {
     const entries: LeaderboardEntry[] = profiles.map(p => {
       const userPreds = predictions?.filter(pr => pr.user_id === p.id) || []
       const total_points = userPreds.reduce((sum, pr) => sum + (pr.points_earned || 0), 0)
-      const exact_scores = userPreds.filter(pr => pr.points_earned >= 8).length
+      const exact_scores = userPreds.filter(pr => pr.points_earned >= 7).length
       const correct_winners = userPreds.filter(pr => pr.points_earned > 0).length
       return { ...p, total_points, exact_scores, correct_winners }
     })

@@ -8,6 +8,19 @@ import { Plus, CheckCircle, RefreshCw, Download, AlertCircle, Info } from 'lucid
 
 type StatusMsg = { type: 'success' | 'error' | 'info'; message: string }
 
+function calcPoints(
+  predHome: number, predAway: number, predWinner: string,
+  scoreHome: number, scoreAway: number, actualWinner: string,
+): number {
+  if (predHome === scoreHome && predAway === scoreAway) return 7
+  const correctWinner = predWinner === actualWinner
+  const partialScore = (predHome === scoreHome) !== (predAway === scoreAway)
+  if (correctWinner && partialScore) return 4
+  if (correctWinner) return 3
+  if (partialScore) return 1
+  return 0
+}
+
 export default function AdminPage() {
   const [matches, setMatches] = useState<Match[]>([])
   const [loading, setLoading] = useState(true)
@@ -113,9 +126,7 @@ export default function AdminPage() {
 
             if (preds) {
               for (const pred of preds) {
-                const exactScore = pred.predicted_home === scoreHome && pred.predicted_away === scoreAway
-                const correctWinner = pred.predicted_winner === actualWinner
-                const points = exactScore ? 8 : correctWinner ? 3 : 0
+                const points = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
                 totalPoints += points
                 await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
               }
@@ -160,9 +171,7 @@ export default function AdminPage() {
     const { data: preds } = await supabase.from('predictions').select('*').eq('match_id', match.id)
     if (preds) {
       for (const pred of preds) {
-        const exactScore = pred.predicted_home === scoreHome && pred.predicted_away === scoreAway
-        const correctWinner = pred.predicted_winner === actualWinner
-        const points = exactScore ? 8 : correctWinner ? 3 : 0
+        const points = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
         await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
       }
     }
