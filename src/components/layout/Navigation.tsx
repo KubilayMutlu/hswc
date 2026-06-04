@@ -10,6 +10,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'pronostics', label: 'Pronostics', icon: '🎯' },
   { id: 'matchs', label: 'Matchs', icon: '⚽' },
   { id: 'defis', label: 'Défis', icon: '🔥' },
+  { id: 'ligues', label: 'Ligues', icon: '🌐' },
 ]
 
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {

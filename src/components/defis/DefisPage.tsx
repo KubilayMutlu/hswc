@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useLeague } from '@/context/LeagueContext'
 
 interface ChallengeResult {
   leader_name: string
@@ -18,17 +19,23 @@ interface Challenge {
 export default function DefisPage() {
   const [challenges, setChallenges] = useState<Challenge[]>([])
   const [loading, setLoading] = useState(true)
+  const { activeMemberIds } = useLeague()
 
   useEffect(() => {
-    computeChallenges()
-  }, [])
+    computeChallenges(activeMemberIds)
+  }, [activeMemberIds])
 
-  async function computeChallenges() {
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_initials')
+  async function computeChallenges(memberIds: string[] | null) {
+    setLoading(true)
+    const { data: allProfiles } = await supabase.from('profiles').select('id, full_name, avatar_initials')
     const { data: predictions } = await supabase.from('predictions').select('*')
     const { data: matches } = await supabase.from('matches').select('*')
 
-    if (!profiles || !predictions || !matches) { setLoading(false); return }
+    if (!allProfiles || !predictions || !matches) { setLoading(false); return }
+
+    const profiles = memberIds
+      ? allProfiles.filter(p => memberIds.includes(p.id))
+      : allProfiles
 
     const safeProfiles = profiles
 
@@ -53,15 +60,14 @@ export default function DefisPage() {
     const sfMatchIds = matches.filter(m => m.phase?.includes('demi') || m.phase?.includes('Demi')).map(m => m.id)
     const finalMatchIds = matches.filter(m => m.phase?.toLowerCase().includes('final') && !m.phase?.toLowerCase().includes('demi')).map(m => m.id)
 
-    const roiGroupes = bestUser(uid => {
-      return predictions.filter(p => p.user_id === uid && groupMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    })
+    const roiGroupes = bestUser(uid =>
+      predictions.filter(p => p.user_id === uid && groupMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
+    )
 
-    const sniper = bestUser(uid => {
-      return predictions.filter(p => p.user_id === uid && p.points_earned >= 8).length
-    })
+    const sniper = bestUser(uid =>
+      predictions.filter(p => p.user_id === uid && p.points_earned >= 8).length
+    )
 
-    // Série en feu — longest streak of correct winners
     const serie = bestUser(uid => {
       const matchesSorted = matches
         .filter(m => m.is_finished)
@@ -75,23 +81,26 @@ export default function DefisPage() {
       return maxStreak
     })
 
-    const maitre8 = bestUser(uid => {
-      return predictions.filter(p => p.user_id === uid && r16MatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    })
+    const maitre8 = bestUser(uid =>
+      predictions.filter(p => p.user_id === uid && r16MatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
+    )
 
-    const oracle = bestUser(uid => {
-      return predictions.filter(p => p.user_id === uid && sfMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    })
+    const oracle = bestUser(uid =>
+      predictions.filter(p => p.user_id === uid && sfMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
+    )
 
-    // Champion du monde — correctly predicted the final winner
     let champion: ChallengeResult | null = null
     const finalMatch = matches.find(m => finalMatchIds.includes(m.id) && m.is_finished)
     if (finalMatch) {
       const actualWinner = finalMatch.score_home! > finalMatch.score_away! ? 'home' : finalMatch.score_away! > finalMatch.score_home! ? 'away' : 'draw'
-      const winners = predictions.filter(p => p.match_id === finalMatch.id && p.predicted_winner === actualWinner)
+      const winners = predictions.filter(p =>
+        p.match_id === finalMatch.id &&
+        p.predicted_winner === actualWinner &&
+        safeProfiles.some(pr => pr.id === p.user_id)
+      )
       if (winners.length > 0) {
         const first = winners[0]
-        const p = profiles.find(pr => pr.id === first.user_id)
+        const p = safeProfiles.find(pr => pr.id === first.user_id)
         champion = { leader_name: p?.full_name || '?', leader_initials: p?.avatar_initials || '?', score: '✓' }
       }
     }

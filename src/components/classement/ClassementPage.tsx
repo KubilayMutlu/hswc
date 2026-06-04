@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/types'
+import { useLeague } from '@/context/LeagueContext'
 import { Trophy, Target, Crosshair, TrendingUp } from 'lucide-react'
 
 interface LeaderboardEntry {
@@ -19,14 +20,20 @@ interface ClassementPageProps {
 export default function ClassementPage({ profile }: ClassementPageProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const { activeMemberIds, activeLeague } = useLeague()
 
   useEffect(() => {
-    fetchLeaderboard()
-  }, [])
+    fetchLeaderboard(activeMemberIds)
+  }, [activeMemberIds])
 
-  async function fetchLeaderboard() {
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name, avatar_initials')
-    if (!profiles) { setLoading(false); return }
+  async function fetchLeaderboard(memberIds: string[] | null) {
+    setLoading(true)
+    const { data: allProfiles } = await supabase.from('profiles').select('id, full_name, avatar_initials')
+    if (!allProfiles) { setLoading(false); return }
+
+    const profiles = memberIds
+      ? allProfiles.filter(p => memberIds.includes(p.id))
+      : allProfiles
 
     const { data: predictions } = await supabase
       .from('predictions')
@@ -89,7 +96,6 @@ export default function ClassementPage({ profile }: ClassementPageProps) {
         <div className="bg-gradient-to-br from-dark to-[#2A2F5C] rounded-2xl p-6 text-white">
           <h2 className="text-sm font-semibold text-gray-300 mb-5 text-center uppercase tracking-wider">Podium</h2>
           <div className="flex items-end justify-center gap-4">
-            {/* 2nd */}
             <div className="flex flex-col items-center">
               <div className="w-10 h-10 rounded-full bg-gray-400 flex items-center justify-center text-white text-sm font-bold mb-2">
                 {podium[1]?.avatar_initials}
@@ -100,7 +106,6 @@ export default function ClassementPage({ profile }: ClassementPageProps) {
                 <span className="text-2xl">🥈</span>
               </div>
             </div>
-            {/* 1st */}
             <div className="flex flex-col items-center">
               <div className="w-12 h-12 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold mb-2 ring-2 ring-yellow-400">
                 {podium[0]?.avatar_initials}
@@ -111,7 +116,6 @@ export default function ClassementPage({ profile }: ClassementPageProps) {
                 <span className="text-2xl">🥇</span>
               </div>
             </div>
-            {/* 3rd */}
             <div className="flex flex-col items-center">
               <div className="w-10 h-10 rounded-full bg-amber-600 flex items-center justify-center text-white text-sm font-bold mb-2">
                 {podium[2]?.avatar_initials}
@@ -129,7 +133,9 @@ export default function ClassementPage({ profile }: ClassementPageProps) {
       {/* Full leaderboard */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-5 py-4 border-b border-gray-100">
-          <h2 className="font-semibold text-dark">Classement général</h2>
+          <h2 className="font-semibold text-dark">
+            {activeLeague ? `Classement — ${activeLeague.name}` : 'Classement général'}
+          </h2>
         </div>
         <div className="divide-y divide-gray-50">
           {leaderboard.map((entry, index) => {

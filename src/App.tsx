@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Profile } from '@/types'
+import { LeagueProvider } from '@/context/LeagueContext'
 import LoginPage from '@/components/auth/LoginPage'
 import Topbar from '@/components/layout/Topbar'
 import Navigation from '@/components/layout/Navigation'
@@ -9,8 +10,9 @@ import PronosticsPage from '@/components/pronostics/PronosticsPage'
 import MatchsPage from '@/components/matchs/MatchsPage'
 import DefisPage from '@/components/defis/DefisPage'
 import AdminPage from '@/components/admin/AdminPage'
+import LeaguesPage from '@/components/leagues/LeaguesPage'
 
-export type Tab = 'classement' | 'pronostics' | 'matchs' | 'defis'
+export type Tab = 'classement' | 'pronostics' | 'matchs' | 'defis' | 'ligues'
 
 function App() {
   const [session, setSession] = useState<any>(null)
@@ -62,31 +64,48 @@ function App() {
   }
 
   if (!session) {
-    return <LoginPage />
+    return <LoginPage onSignupSuccess={() => setActiveTab('ligues')} />
   }
+
+  const userId = session.user.id
 
   if (showAdmin && profile?.is_admin) {
     return (
-      <div className="min-h-screen bg-background">
-        <Topbar profile={profile} onAdminClick={() => setShowAdmin(false)} showingAdmin />
-        <main className="max-w-5xl mx-auto px-4 py-6">
-          <AdminPage />
-        </main>
-      </div>
+      <LeagueProvider userId={userId}>
+        <div className="min-h-screen bg-background">
+          <Topbar
+            profile={profile}
+            onAdminClick={() => setShowAdmin(false)}
+            showingAdmin
+            onLiguesClick={() => { setShowAdmin(false); setActiveTab('ligues') }}
+          />
+          <main className="max-w-5xl mx-auto px-4 py-6">
+            <AdminPage />
+          </main>
+        </div>
+      </LeagueProvider>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Topbar profile={profile} onAdminClick={() => setShowAdmin(true)} showingAdmin={false} />
-      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        {activeTab === 'classement' && <ClassementPage profile={profile} />}
-        {activeTab === 'pronostics' && <PronosticsPage profile={profile} />}
-        {activeTab === 'matchs' && <MatchsPage profile={profile} />}
-        {activeTab === 'defis' && <DefisPage />}
-      </main>
-    </div>
+    <LeagueProvider userId={userId}>
+      <div className="min-h-screen bg-background">
+        <Topbar
+          profile={profile}
+          onAdminClick={() => setShowAdmin(true)}
+          showingAdmin={false}
+          onLiguesClick={() => setActiveTab('ligues')}
+        />
+        <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+        <main className="max-w-5xl mx-auto px-4 py-6">
+          {activeTab === 'classement' && <ClassementPage profile={profile} />}
+          {activeTab === 'pronostics' && <PronosticsPage profile={profile} />}
+          {activeTab === 'matchs' && <MatchsPage profile={profile} />}
+          {activeTab === 'defis' && <DefisPage />}
+          {activeTab === 'ligues' && <LeaguesPage profile={profile} />}
+        </main>
+      </div>
+    </LeagueProvider>
   )
 }
 

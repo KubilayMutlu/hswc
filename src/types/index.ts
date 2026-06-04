@@ -38,3 +38,11 @@ export interface LeaderboardEntry {
   correct_winners: number
   rank: number
 }
+
+export interface League {
+  id: string
+  name: string
+  code: string
+  created_by: string
+  created_at: string
+}
