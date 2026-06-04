@@ -4,6 +4,7 @@ import type { Match, Profile } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { Lock } from 'lucide-react'
+import MatchDetailModal from '@/components/matchs/MatchDetailModal'
 
 interface PronosticsPageProps {
   profile: Profile | null
@@ -38,6 +39,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [inputs, setInputs] = useState<Record<string, { home: string; away: string }>>({})
+  const [selectedMatch, setSelectedMatch] = useState<MatchWithPrediction | null>(null)
 
   useEffect(() => {
     fetchMatchesAndPredictions()
@@ -153,7 +155,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
             return (
               <div key={match.id} className="card card-hover rounded-2xl overflow-hidden">
-                <div className="bg-gray-50 px-5 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                <div className="bg-gray-50 px-5 py-2.5 border-b border-gray-100 flex items-center justify-between cursor-pointer" onClick={() => setSelectedMatch(match)}>
                   <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{match.phase}</span>
                   <span className="text-xs text-gray-400">
                     {format(new Date(match.kickoff_at), 'EEE d MMM · HH:mm', { locale: fr })}
@@ -224,7 +226,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
             <Lock className="w-3.5 h-3.5" /> Pronostics verrouillés
           </h3>
           {locked.map(match => (
-            <div key={match.id} className="card rounded-xl px-5 py-3 flex items-center justify-between opacity-60">
+            <div key={match.id} className="card card-hover rounded-xl px-5 py-3 flex items-center justify-between opacity-60 cursor-pointer" onClick={() => setSelectedMatch(match)}>
               <div className="flex items-center gap-2">
                 <span className="text-xl">{match.flag_home}</span>
                 <span className="font-medium text-sm text-dark">{match.team_home}</span>
@@ -243,6 +245,10 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
             </div>
           ))}
         </div>
+      )}
+
+      {selectedMatch && (
+        <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />
       )}
     </div>
   )

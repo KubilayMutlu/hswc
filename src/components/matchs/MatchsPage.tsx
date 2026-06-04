@@ -4,6 +4,7 @@ import type { Match, Profile } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { CheckCircle, Circle } from 'lucide-react'
+import MatchDetailModal from './MatchDetailModal'
 
 interface MatchsPageProps {
   profile: Profile | null
@@ -22,6 +23,7 @@ export default function MatchsPage({ profile }: MatchsPageProps) {
   const [finishedMatches, setFinishedMatches] = useState<MatchWithPred[]>([])
   const [upcomingMatches, setUpcomingMatches] = useState<MatchWithPred[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedMatch, setSelectedMatch] = useState<MatchWithPred | null>(null)
 
   useEffect(() => {
     fetchMatches()
@@ -85,7 +87,7 @@ export default function MatchsPage({ profile }: MatchsPageProps) {
                 match.score_home! > match.score_away! ? 'home' :
                 match.score_away! > match.score_home! ? 'away' : 'draw'
               return (
-                <div key={match.id} className="card card-hover rounded-xl p-4">
+                <div key={match.id} className="card card-hover rounded-xl p-4 cursor-pointer" onClick={() => setSelectedMatch(match)}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs text-gray-400 font-medium">{match.phase}</span>
                     <span className="text-xs text-gray-400">{format(new Date(match.kickoff_at), 'd MMM', { locale: fr })}</span>
@@ -144,7 +146,7 @@ export default function MatchsPage({ profile }: MatchsPageProps) {
             {upcomingMatches.map(match => {
               const hasPred = !!match.prediction
               return (
-                <div key={match.id} className="card card-hover rounded-xl p-4">
+                <div key={match.id} className="card card-hover rounded-xl p-4 cursor-pointer" onClick={() => setSelectedMatch(match)}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs text-gray-400 font-medium">{match.phase}</span>
                     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${hasPred ? 'bg-green-50 text-green-600 border border-green-200' : 'bg-orange-50 text-orange-600 border border-orange-200'}`}>
@@ -181,6 +183,10 @@ export default function MatchsPage({ profile }: MatchsPageProps) {
           <div className="text-4xl mb-3">📅</div>
           <p className="font-semibold text-dark">Aucun match encore programmé.</p>
         </div>
+      )}
+
+      {selectedMatch && (
+        <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />
       )}
     </div>
   )
