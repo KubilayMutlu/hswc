@@ -23,6 +23,18 @@ function deriveWinner(home: number, away: number): 'home' | 'away' | 'draw' {
   return 'draw'
 }
 
+const LIVE_STATUSES = ['IN_PLAY', 'PAUSED', 'FINISHED', 'SUSPENDED', 'POSTPONED', 'CANCELLED', 'AWARDED']
+
+function isLocked(match: MatchWithPrediction): boolean {
+  if (match.external_id != null) {
+    // API-tracked match: lock immediately on live/final status, or 5 min before kickoff
+    if (match.status && LIVE_STATUSES.includes(match.status)) return true
+    return new Date(match.kickoff_at).getTime() - Date.now() < 5 * 60 * 1000
+  }
+  // Manual match (no external_id): never time-lock — admin controls via is_finished
+  return false
+}
+
 export default function PronosticsPage({ profile }: PronosticsPageProps) {
   const [matches, setMatches] = useState<MatchWithPrediction[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,10 +83,6 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     setLoading(false)
   }
 
-  function isLocked(kickoff: string) {
-    return new Date(kickoff).getTime() - Date.now() < 5 * 60 * 1000
-  }
-
   async function handleSave(match: MatchWithPrediction) {
     const input = inputs[match.id]
     if (!input || input.home === '' || input.away === '' || !profile) return
@@ -105,8 +113,8 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     return <div className="flex items-center justify-center py-20"><p className="text-gray-400">Chargement…</p></div>
   }
 
-  const upcoming = matches.filter(m => !isLocked(m.kickoff_at))
-  const locked = matches.filter(m => isLocked(m.kickoff_at))
+  const upcoming = matches.filter(m => !isLocked(m))
+  const locked = matches.filter(m => isLocked(m))
 
   return (
     <div className="space-y-6">

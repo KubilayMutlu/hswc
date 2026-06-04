@@ -61,8 +61,8 @@ export default function MatchsPage({ profile }: MatchsPageProps) {
   function getPredBadge(match: MatchWithPred) {
     if (!match.prediction) return null
     const pts = match.prediction.points_earned
-    if (pts >= 8) return { label: '✓ Score exact', color: 'bg-green-100 text-green-700', pts }
-    if (pts >= 3) return { label: '✓ Vainqueur', color: 'bg-blue-100 text-blue-700', pts }
+    if (pts >= 7) return { label: '✓ Score exact', color: 'bg-green-100 text-green-700', pts }
+    if (pts >= 3) return { label: '✓ Bon résultat', color: 'bg-blue-100 text-blue-700', pts }
     return { label: '✗ Raté', color: 'bg-red-100 text-red-700', pts: 0 }
   }
 
