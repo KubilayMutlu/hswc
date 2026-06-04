@@ -57,7 +57,7 @@ function App() {
           <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
             <span className="text-white font-bold text-lg">HS</span>
           </div>
-          <p className="text-gray-500 text-sm">Chargement...</p>
+          <p className="text-white/40 text-sm">Chargement...</p>
         </div>
       </div>
     )

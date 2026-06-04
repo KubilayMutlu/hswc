@@ -120,43 +120,43 @@ export default function DefisPage() {
   }
 
   if (loading) {
-    return <div className="flex items-center justify-center py-20"><p className="text-gray-400">Calcul des défis…</p></div>
+    return <div className="flex items-center justify-center py-20"><p className="text-white/40">Calcul des défis…</p></div>
   }
 
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-bold text-dark mb-1">Défis</h2>
-        <p className="text-sm text-gray-500">Classements thématiques en temps réel</p>
+        <h2 className="text-lg font-bold text-white mb-1">Défis</h2>
+        <p className="text-sm text-white/40">Classements thématiques en temps réel</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {challenges.map(challenge => (
-          <div key={challenge.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div key={challenge.id} className="glass-card glass-card-hover rounded-2xl p-5">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-xl shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-xl shrink-0">
                 {challenge.icon}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-semibold text-dark text-sm">{challenge.title}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">{challenge.description}</p>
+                <h3 className="font-semibold text-white text-sm">{challenge.title}</h3>
+                <p className="text-xs text-white/40 mt-0.5">{challenge.description}</p>
               </div>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-gray-50">
+            <div className="mt-4 pt-4 border-t border-white/8">
               {challenge.result ? (
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0 shadow-sm shadow-primary/30">
                     {challenge.result.leader_initials}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-dark truncate">{challenge.result.leader_name}</div>
+                    <div className="text-sm font-semibold text-white truncate">{challenge.result.leader_name}</div>
                     <div className="text-xs text-primary font-bold">{challenge.result.score}</div>
                   </div>
                   <div className="text-lg">🏅</div>
                 </div>
               ) : (
-                <div className="text-xs text-gray-400 italic">Pas encore de leader</div>
+                <div className="text-xs text-white/30 italic">Pas encore de leader</div>
               )}
             </div>
           </div>
