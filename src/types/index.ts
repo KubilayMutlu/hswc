@@ -3,6 +3,16 @@ export interface Profile {
   full_name: string
   avatar_initials: string
   is_admin: boolean
+  bonus_points?: number
+}
+
+export interface TournamentPrediction {
+  id: string
+  user_id: string
+  type: 'top_scorer' | 'top_assist'
+  prediction: string
+  is_correct: boolean
+  created_at: string
 }
 
 export interface Match {

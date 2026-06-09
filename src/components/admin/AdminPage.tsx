@@ -4,9 +4,18 @@ import { fetchWorldCupMatches, fetchMatchScore, mapApiMatchToSupabase, sleep, ge
 import type { Match } from '@/types'
 import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
-import { Plus, CheckCircle, RefreshCw, Download, AlertCircle, Info } from 'lucide-react'
+import { Plus, CheckCircle, RefreshCw, Download, AlertCircle, Info, Trophy } from 'lucide-react'
 
 type StatusMsg = { type: 'success' | 'error' | 'info'; message: string }
+
+interface TournamentPredRow {
+  id: string
+  user_id: string
+  type: string
+  prediction: string
+  is_correct: boolean
+  profiles: { full_name: string; avatar_initials: string } | null
+}
 
 function calcPoints(
   predHome: number, predAway: number, predWinner: string,
@@ -36,15 +45,58 @@ export default function AdminPage() {
   const [updatingScores, setUpdatingScores] = useState(false)
   const [syncStatus, setSyncStatus] = useState<StatusMsg | null>(null)
   const [updateProgress, setUpdateProgress] = useState('')
+  const [tournamentPreds, setTournamentPreds] = useState<TournamentPredRow[]>([])
+  const [tournamentProfiles, setTournamentProfiles] = useState<any[]>([])
+  const [actualWinnerInput, setActualWinnerInput] = useState({ top_scorer: '', top_assist: '' })
+  const [validatingTournament, setValidatingTournament] = useState<string | null>(null)
+  const [tournamentStatus, setTournamentStatus] = useState<StatusMsg | null>(null)
 
   useEffect(() => {
     fetchMatches()
+    loadTournamentData()
   }, [])
 
   async function fetchMatches() {
     const { data } = await supabase.from('matches').select('*').order('kickoff_at', { ascending: true })
     setMatches(data || [])
     setLoading(false)
+  }
+
+  async function loadTournamentData() {
+    const [predsRes, profilesRes] = await Promise.all([
+      supabase.from('tournament_predictions').select('*, profiles(full_name, avatar_initials)').order('created_at'),
+      supabase.from('profiles').select('id, full_name, bonus_points'),
+    ])
+    if (predsRes.data) setTournamentPreds(predsRes.data as TournamentPredRow[])
+    if (profilesRes.data) setTournamentProfiles(profilesRes.data)
+  }
+
+  async function handleValidateTournament(type: 'top_scorer' | 'top_assist') {
+    const actual = actualWinnerInput[type].trim()
+    if (!actual) return
+    setValidatingTournament(type)
+    setTournamentStatus(null)
+
+    const actualNorm = actual.toLowerCase()
+    const matching = tournamentPreds.filter(p =>
+      p.type === type && p.prediction.trim().toLowerCase() === actualNorm && !p.is_correct
+    )
+
+    for (const pred of matching) {
+      await supabase.from('tournament_predictions').update({ is_correct: true }).eq('id', pred.id)
+      const profile = tournamentProfiles.find(p => p.id === pred.user_id)
+      const currentBonus = profile?.bonus_points || 0
+      await supabase.from('profiles').update({ bonus_points: currentBonus + 20 }).eq('id', pred.user_id)
+    }
+
+    await loadTournamentData()
+    setValidatingTournament(null)
+    setTournamentStatus({
+      type: matching.length > 0 ? 'success' : 'info',
+      message: matching.length > 0
+        ? `✓ ${matching.length} gagnant${matching.length > 1 ? 's' : ''} validé${matching.length > 1 ? 's' : ''} · +20 pts chacun`
+        : 'Aucune prédiction ne correspond exactement (vérifier la casse)',
+    })
   }
 
   async function handleSyncMatches() {
@@ -426,6 +478,81 @@ export default function AdminPage() {
             Aucun match. Utilise la sync API ou ajoute-en un manuellement.
           </div>
         )}
+      </div>
+
+      {/* Tournament defis section */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="font-semibold text-dark mb-4 flex items-center gap-2">
+          <Trophy className="w-4 h-4" /> Défis Tournoi
+        </h2>
+
+        {tournamentStatus && (
+          <div className={`mb-4 flex items-center gap-2 text-sm border rounded-lg px-3 py-2 ${
+            tournamentStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-800'
+            : tournamentStatus.type === 'error' ? 'bg-red-50 border-red-200 text-red-800'
+            : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}>
+            {tournamentStatus.type === 'success' ? <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
+              : tournamentStatus.type === 'error' ? <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+              : <Info className="w-4 h-4 text-blue-500 shrink-0" />}
+            <span>{tournamentStatus.message}</span>
+          </div>
+        )}
+
+        <div className="space-y-6">
+          {([
+            { type: 'top_scorer' as const, icon: '🥇', label: 'Meilleur buteur' },
+            { type: 'top_assist' as const, icon: '🎯', label: 'Meilleur passeur' },
+          ]).map(defi => {
+            const preds = tournamentPreds.filter(p => p.type === defi.type)
+            return (
+              <div key={defi.type}>
+                <h3 className="text-sm font-semibold text-dark mb-3">{defi.icon} {defi.label}</h3>
+
+                {preds.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic mb-3">Aucune prédiction pour l'instant.</p>
+                ) : (
+                  <div className="space-y-1 mb-3 max-h-48 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
+                    {preds.map(pred => (
+                      <div key={pred.id} className="flex items-center justify-between px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-600 shrink-0">
+                            {pred.profiles?.avatar_initials || '?'}
+                          </div>
+                          <span className="text-sm text-gray-600">{pred.profiles?.full_name || pred.user_id.slice(0, 8)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-dark">{pred.prediction}</span>
+                          {pred.is_correct && (
+                            <span className="text-xs bg-green-100 text-green-700 font-semibold px-1.5 py-0.5 rounded-full">✓ +20</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder={`Vrai ${defi.label.toLowerCase()}…`}
+                    value={actualWinnerInput[defi.type]}
+                    onChange={e => setActualWinnerInput(prev => ({ ...prev, [defi.type]: e.target.value }))}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                  <button
+                    onClick={() => handleValidateTournament(defi.type)}
+                    disabled={validatingTournament === defi.type || !actualWinnerInput[defi.type].trim()}
+                    className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50"
+                  >
+                    {validatingTournament === defi.type ? '…' : 'Valider les gagnants'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1.5">La comparaison ignore la casse. Seules les prédictions non encore validées sont traitées.</p>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

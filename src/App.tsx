@@ -109,7 +109,7 @@ function App() {
           {activeTab === 'classement' && <ClassementPage profile={profile} />}
           {activeTab === 'pronostics' && <PronosticsPage profile={profile} />}
           {activeTab === 'matchs' && <MatchsPage profile={profile} />}
-          {activeTab === 'defis' && <DefisPage />}
+          {activeTab === 'defis' && <DefisPage profile={profile} />}
           {activeTab === 'ligues' && <LeaguesPage profile={profile} />}
         </main>
       </div>
