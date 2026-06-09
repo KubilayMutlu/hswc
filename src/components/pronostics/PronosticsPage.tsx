@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Match, Profile } from '@/types'
 import { format } from 'date-fns'
@@ -21,8 +21,16 @@ interface MatchWithPrediction extends Match {
 
 interface SpyResult {
   targetName: string
+  targetUserId: string
   predicted_home: number | null
   predicted_away: number | null
+}
+
+interface ConfirmModal {
+  type: 'double' | 'cancel-double' | 'spy'
+  matchId: string
+  targetUserId?: string
+  targetName?: string
 }
 
 function deriveWinner(home: number, away: number): 'home' | 'away' | 'draw' {
@@ -53,11 +61,35 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
   const [spyResults, setSpyResults] = useState<Record<string, SpyResult>>({})
   const [spyModalOpen, setSpyModalOpen] = useState<string | null>(null)
   const [leagueProfiles, setLeagueProfiles] = useState<{ id: string; full_name: string }[]>([])
+  const [confirmModal, setConfirmModal] = useState<ConfirmModal | null>(null)
+
+  const pollingIntervals = useRef<Record<string, ReturnType<typeof setInterval>>>({})
 
   useEffect(() => {
     fetchMatchesAndPredictions()
     loadPowerUps()
+    return () => { Object.values(pollingIntervals.current).forEach(clearInterval) }
   }, [])
+
+  function startSpyPolling(matchId: string, targetUserId: string) {
+    if (pollingIntervals.current[matchId]) return
+    pollingIntervals.current[matchId] = setInterval(async () => {
+      const { data: pred } = await supabase
+        .from('predictions')
+        .select('predicted_home, predicted_away')
+        .eq('user_id', targetUserId)
+        .eq('match_id', matchId)
+        .maybeSingle()
+      if (pred?.predicted_home !== null && pred?.predicted_home !== undefined) {
+        setSpyResults(prev => ({
+          ...prev,
+          [matchId]: { ...prev[matchId], predicted_home: pred.predicted_home, predicted_away: pred.predicted_away },
+        }))
+        clearInterval(pollingIntervals.current[matchId])
+        delete pollingIntervals.current[matchId]
+      }
+    }, 30000)
+  }
 
   async function fetchMatchesAndPredictions() {
     const { data: matchesData } = await supabase
@@ -135,13 +167,17 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
             matchId: use.match_id as string,
             result: {
               targetName: tp?.full_name?.split(' ')[0] || '?',
+              targetUserId: use.target_user_id as string,
               predicted_home: pred?.predicted_home ?? null,
               predicted_away: pred?.predicted_away ?? null,
             } as SpyResult,
           }
         }))
         const results: Record<string, SpyResult> = {}
-        resolved.forEach(({ matchId, result }) => { results[matchId] = result })
+        resolved.forEach(({ matchId, result }) => {
+          results[matchId] = result
+          if (result.predicted_home === null) startSpyPolling(matchId, result.targetUserId)
+        })
         setSpyResults(results)
       }
     }
@@ -151,10 +187,8 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     const input = inputs[match.id]
     if (!input || input.home === '' || input.away === '' || !profile) return
     setSaving(match.id)
-
     const h = parseInt(input.home)
     const a = parseInt(input.away)
-
     await supabase.from('predictions').upsert({
       user_id: profile.id,
       match_id: match.id,
@@ -169,56 +203,72 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
   async function handleDouble(matchId: string) {
     if (!profile || doubleUses.has(matchId) || powerUps.double <= 0) return
-
     const { error } = await supabase
       .from('power_ups')
       .update({ uses_remaining: powerUps.double - 1 })
       .eq('user_id', profile.id)
       .eq('type', 'double')
     if (error) return
-
     await supabase.from('power_up_uses').insert({ user_id: profile.id, match_id: matchId, type: 'double' })
     setPowerUps(prev => ({ ...prev, double: prev.double - 1 }))
     setDoubleUses(prev => new Set([...prev, matchId]))
   }
 
+  async function handleCancelDouble(matchId: string) {
+    if (!profile) return
+    const { error } = await supabase
+      .from('power_up_uses')
+      .delete()
+      .eq('user_id', profile.id)
+      .eq('match_id', matchId)
+      .eq('type', 'double')
+    if (error) return
+    await supabase
+      .from('power_ups')
+      .update({ uses_remaining: powerUps.double + 1 })
+      .eq('user_id', profile.id)
+      .eq('type', 'double')
+    setPowerUps(prev => ({ ...prev, double: prev.double + 1 }))
+    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
+  }
+
   async function handleSpy(matchId: string, targetUserId: string) {
     if (!profile || powerUps.spy <= 0) return
-
     const targetProfile = leagueProfiles.find(p => p.id === targetUserId)
     const targetName = targetProfile?.full_name?.split(' ')[0] || '?'
-
     const { error } = await supabase
       .from('power_ups')
       .update({ uses_remaining: powerUps.spy - 1 })
       .eq('user_id', profile.id)
       .eq('type', 'spy')
     if (error) return
-
     await supabase.from('power_up_uses').insert({
-      user_id: profile.id,
-      match_id: matchId,
-      type: 'spy',
-      target_user_id: targetUserId,
+      user_id: profile.id, match_id: matchId, type: 'spy', target_user_id: targetUserId,
     })
-
     const { data: pred } = await supabase
       .from('predictions')
       .select('predicted_home, predicted_away')
       .eq('user_id', targetUserId)
       .eq('match_id', matchId)
       .maybeSingle()
-
     setPowerUps(prev => ({ ...prev, spy: prev.spy - 1 }))
-    setSpyResults(prev => ({
-      ...prev,
-      [matchId]: {
-        targetName,
-        predicted_home: pred?.predicted_home ?? null,
-        predicted_away: pred?.predicted_away ?? null,
-      },
-    }))
-    setSpyModalOpen(null)
+    const result: SpyResult = {
+      targetName,
+      targetUserId,
+      predicted_home: pred?.predicted_home ?? null,
+      predicted_away: pred?.predicted_away ?? null,
+    }
+    setSpyResults(prev => ({ ...prev, [matchId]: result }))
+    if (result.predicted_home === null) startSpyPolling(matchId, targetUserId)
+  }
+
+  async function handleConfirm() {
+    if (!confirmModal) return
+    const { type, matchId, targetUserId } = confirmModal
+    setConfirmModal(null)
+    if (type === 'double') await handleDouble(matchId)
+    else if (type === 'cancel-double') await handleCancelDouble(matchId)
+    else if (type === 'spy' && targetUserId) await handleSpy(matchId, targetUserId)
   }
 
   function setInput(matchId: string, field: 'home' | 'away', value: string) {
@@ -231,11 +281,20 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
   const upcoming = matches.filter(m => !isLocked(m))
   const locked = matches.filter(m => isLocked(m))
-
   const spyTargets = leagueProfiles.filter(p =>
-    p.id !== profile?.id &&
-    (!activeMemberIds || activeMemberIds.includes(p.id))
+    p.id !== profile?.id && (!activeMemberIds || activeMemberIds.includes(p.id))
   )
+
+  const confirmDescriptions: Record<string, string> = {}
+  if (confirmModal?.type === 'double') {
+    confirmDescriptions['double'] = `Les points que tu gagnes sur ce match seront doublés. Tu utiliseras 1 atout Double Score (il t'en restera ${powerUps.double - 1}). Cette action peut être annulée avant le coup d'envoi.`
+  }
+  if (confirmModal?.type === 'cancel-double') {
+    confirmDescriptions['cancel-double'] = "Annuler le double score sur ce match ? Tu récupèreras 1 atout Double Score."
+  }
+  if (confirmModal?.type === 'spy') {
+    confirmDescriptions['spy'] = `Tu vas révéler le pronostic de ${confirmModal.targetName} sur ce match. Tu utiliseras 1 atout Espion (il t'en restera ${powerUps.spy - 1}). Cette action est définitive.`
+  }
 
   return (
     <div className="space-y-6">
@@ -267,7 +326,6 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                 input.away !== String(match.prediction.predicted_away)
               : input.home !== '' || input.away !== ''
             const canSave = input.home !== '' && input.away !== ''
-
             const h = parseInt(input.home)
             const a = parseInt(input.away)
             const derivedWinner = canSave ? deriveWinner(h, a) : null
@@ -275,10 +333,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
               ? `Victoire ${match.team_home}`
               : derivedWinner === 'away'
               ? `Victoire ${match.team_away}`
-              : derivedWinner === 'draw'
-              ? 'Match nul'
-              : null
-
+              : derivedWinner === 'draw' ? 'Match nul' : null
             const isDoubleActive = doubleUses.has(match.id)
             const spyResult = spyResults[match.id]
             const isSpyDone = !!spyResult
@@ -300,20 +355,14 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                     </div>
                     <div className="flex items-center gap-2">
                       <input
-                        type="number"
-                        min="0"
-                        max="20"
-                        value={input.home}
+                        type="number" min="0" max="20" value={input.home}
                         onChange={e => setInput(match.id, 'home', e.target.value)}
                         className="w-12 h-10 bg-white border-2 border-gray-200 rounded-lg text-center font-bold text-gray-800 focus:outline-none focus:border-primary transition text-lg"
                         placeholder="0"
                       />
                       <span className="text-gray-300 font-bold">–</span>
                       <input
-                        type="number"
-                        min="0"
-                        max="20"
-                        value={input.away}
+                        type="number" min="0" max="20" value={input.away}
                         onChange={e => setInput(match.id, 'away', e.target.value)}
                         className="w-12 h-10 bg-white border-2 border-gray-200 rounded-lg text-center font-bold text-gray-800 focus:outline-none focus:border-primary transition text-lg"
                         placeholder="0"
@@ -344,26 +393,37 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                         {saving === match.id ? 'Sauvegarde…' : isSaved && !isDirty ? '✓ Enregistré' : 'Valider'}
                       </button>
 
-                      {/* Double Score button */}
-                      <div className="relative">
-                        <button
-                          onClick={() => handleDouble(match.id)}
-                          disabled={powerUps.double <= 0 || isDoubleActive}
-                          title={isDoubleActive ? 'Double score activé !' : `×2 Score (${powerUps.double} restant${powerUps.double > 1 ? 's' : ''})`}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
-                            isDoubleActive
-                              ? 'bg-green-100 text-green-600 cursor-default'
-                              : powerUps.double > 0
-                              ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
-                              : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                          }`}
-                        >
-                          {isDoubleActive ? '✓' : '×2'}
-                        </button>
-                        {!isDoubleActive && (
-                          <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
-                            {powerUps.double}
-                          </span>
+                      {/* Double Score button + cancel × */}
+                      <div className="flex items-center gap-1">
+                        <div className="relative">
+                          <button
+                            onClick={() => !isDoubleActive && setConfirmModal({ type: 'double', matchId: match.id })}
+                            disabled={!isDoubleActive && powerUps.double <= 0}
+                            title={isDoubleActive ? 'Double score activé !' : `×2 Score (${powerUps.double} restant${powerUps.double > 1 ? 's' : ''})`}
+                            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                              isDoubleActive
+                                ? 'bg-green-100 text-green-600 cursor-default'
+                                : powerUps.double > 0
+                                ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
+                                : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                            }`}
+                          >
+                            {isDoubleActive ? '✓' : '×2'}
+                          </button>
+                          {!isDoubleActive && (
+                            <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
+                              {powerUps.double}
+                            </span>
+                          )}
+                        </div>
+                        {isDoubleActive && (
+                          <button
+                            onClick={() => setConfirmModal({ type: 'cancel-double', matchId: match.id })}
+                            title="Annuler le double score"
+                            className="w-5 h-5 rounded-full bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-400 text-xs font-bold flex items-center justify-center transition leading-none"
+                          >
+                            ×
+                          </button>
                         )}
                       </div>
 
@@ -403,7 +463,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                     </div>
                   )}
 
-                  {/* Spy modal */}
+                  {/* Spy target selector */}
                   {spyModalOpen === match.id && (
                     <div className="mt-3 bg-gray-50 rounded-xl p-3 border border-gray-100">
                       <p className="text-xs font-medium text-gray-500 mb-2">Choisir qui espionner :</p>
@@ -411,7 +471,15 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                         {spyTargets.map(target => (
                           <button
                             key={target.id}
-                            onClick={() => handleSpy(match.id, target.id)}
+                            onClick={() => {
+                              setSpyModalOpen(null)
+                              setConfirmModal({
+                                type: 'spy',
+                                matchId: match.id,
+                                targetUserId: target.id,
+                                targetName: target.full_name.split(' ')[0],
+                              })
+                            }}
                             className="w-full text-left px-3 py-1.5 text-sm text-dark hover:bg-white rounded-lg transition"
                           >
                             {target.full_name}
@@ -459,6 +527,50 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
       {selectedMatch && (
         <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} />
+      )}
+
+      {/* Confirmation modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setConfirmModal(null)} />
+          <div className="relative bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="text-center mb-4">
+              <div className="text-3xl mb-2">
+                {confirmModal.type === 'double' ? '×2'
+                  : confirmModal.type === 'cancel-double' ? '🚫'
+                  : '🔍'}
+              </div>
+              <h3 className="font-bold text-dark text-base">
+                {confirmModal.type === 'double' ? '×2 Double Score'
+                  : confirmModal.type === 'cancel-double' ? 'Annuler le double score'
+                  : '🔍 Espionner un joueur'}
+              </h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-6 text-center leading-relaxed">
+              {confirmModal.type === 'double' && confirmDescriptions['double']}
+              {confirmModal.type === 'cancel-double' && confirmDescriptions['cancel-double']}
+              {confirmModal.type === 'spy' && confirmDescriptions['spy']}
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmModal(null)}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-gray-100 text-gray-600 font-semibold text-sm hover:bg-gray-200 transition"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleConfirm}
+                className={`flex-1 px-4 py-2.5 rounded-xl font-semibold text-sm transition ${
+                  confirmModal.type === 'cancel-double'
+                    ? 'bg-red-500 text-white hover:bg-red-600'
+                    : 'bg-primary text-white hover:bg-primary/90'
+                }`}
+              >
+                Confirmer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
