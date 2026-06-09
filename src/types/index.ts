@@ -46,3 +46,19 @@ export interface League {
   created_by: string
   created_at: string
 }
+
+export interface PowerUp {
+  id: string
+  user_id: string
+  type: 'spy' | 'double'
+  uses_remaining: number
+}
+
+export interface PowerUpUse {
+  id: string
+  user_id: string
+  match_id: string
+  type: 'spy' | 'double'
+  target_user_id?: string
+  created_at: string
+}

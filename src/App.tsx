@@ -48,6 +48,14 @@ function App() {
 
     setProfile(data)
     setLoading(false)
+    initPowerUps(userId)
+  }
+
+  async function initPowerUps(userId: string) {
+    await supabase.from('power_ups').upsert([
+      { user_id: userId, type: 'spy', uses_remaining: 3 },
+      { user_id: userId, type: 'double', uses_remaining: 3 },
+    ], { onConflict: 'user_id,type', ignoreDuplicates: true })
   }
 
   if (loading) {

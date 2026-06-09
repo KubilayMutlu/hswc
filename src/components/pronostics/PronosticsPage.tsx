@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { fr } from 'date-fns/locale'
 import { Lock } from 'lucide-react'
 import MatchDetailModal from '@/components/matchs/MatchDetailModal'
+import { useLeague } from '@/context/LeagueContext'
 
 interface PronosticsPageProps {
   profile: Profile | null
@@ -16,6 +17,12 @@ interface MatchWithPrediction extends Match {
     predicted_away: number
     predicted_winner: string
   }
+}
+
+interface SpyResult {
+  targetName: string
+  predicted_home: number | null
+  predicted_away: number | null
 }
 
 function deriveWinner(home: number, away: number): 'home' | 'away' | 'draw' {
@@ -35,14 +42,21 @@ function isLocked(match: MatchWithPrediction): boolean {
 }
 
 export default function PronosticsPage({ profile }: PronosticsPageProps) {
+  const { activeMemberIds } = useLeague()
   const [matches, setMatches] = useState<MatchWithPrediction[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
   const [inputs, setInputs] = useState<Record<string, { home: string; away: string }>>({})
   const [selectedMatch, setSelectedMatch] = useState<MatchWithPrediction | null>(null)
+  const [powerUps, setPowerUps] = useState({ spy: 3, double: 3 })
+  const [doubleUses, setDoubleUses] = useState<Set<string>>(new Set())
+  const [spyResults, setSpyResults] = useState<Record<string, SpyResult>>({})
+  const [spyModalOpen, setSpyModalOpen] = useState<string | null>(null)
+  const [leagueProfiles, setLeagueProfiles] = useState<{ id: string; full_name: string }[]>([])
 
   useEffect(() => {
     fetchMatchesAndPredictions()
+    loadPowerUps()
   }, [])
 
   async function fetchMatchesAndPredictions() {
@@ -83,6 +97,56 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     setLoading(false)
   }
 
+  async function loadPowerUps() {
+    if (!profile) return
+
+    const [profilesRes, pupsRes, usesRes] = await Promise.all([
+      supabase.from('profiles').select('id, full_name'),
+      supabase.from('power_ups').select('*').eq('user_id', profile.id),
+      supabase.from('power_up_uses').select('*').eq('user_id', profile.id),
+    ])
+
+    if (profilesRes.data) setLeagueProfiles(profilesRes.data)
+
+    if (pupsRes.data) {
+      const spy = pupsRes.data.find((p: any) => p.type === 'spy')
+      const dbl = pupsRes.data.find((p: any) => p.type === 'double')
+      setPowerUps({ spy: spy?.uses_remaining ?? 0, double: dbl?.uses_remaining ?? 0 })
+    }
+
+    if (usesRes.data) {
+      const doublesSet = new Set(
+        usesRes.data.filter((u: any) => u.type === 'double').map((u: any) => u.match_id as string)
+      )
+      setDoubleUses(doublesSet)
+
+      const spyUsesList = usesRes.data.filter((u: any) => u.type === 'spy')
+      if (spyUsesList.length > 0) {
+        const profiles = profilesRes.data || []
+        const resolved = await Promise.all(spyUsesList.map(async (use: any) => {
+          const tp = profiles.find((p: any) => p.id === use.target_user_id)
+          const { data: pred } = await supabase
+            .from('predictions')
+            .select('predicted_home, predicted_away')
+            .eq('user_id', use.target_user_id)
+            .eq('match_id', use.match_id)
+            .maybeSingle()
+          return {
+            matchId: use.match_id as string,
+            result: {
+              targetName: tp?.full_name?.split(' ')[0] || '?',
+              predicted_home: pred?.predicted_home ?? null,
+              predicted_away: pred?.predicted_away ?? null,
+            } as SpyResult,
+          }
+        }))
+        const results: Record<string, SpyResult> = {}
+        resolved.forEach(({ matchId, result }) => { results[matchId] = result })
+        setSpyResults(results)
+      }
+    }
+  }
+
   async function handleSave(match: MatchWithPrediction) {
     const input = inputs[match.id]
     if (!input || input.home === '' || input.away === '' || !profile) return
@@ -91,18 +155,70 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     const h = parseInt(input.home)
     const a = parseInt(input.away)
 
-    const payload = {
+    await supabase.from('predictions').upsert({
       user_id: profile.id,
       match_id: match.id,
       predicted_home: h,
       predicted_away: a,
       predicted_winner: deriveWinner(h, a),
       points_earned: 0,
-    }
-
-    await supabase.from('predictions').upsert(payload, { onConflict: 'user_id,match_id' })
+    }, { onConflict: 'user_id,match_id' })
     await fetchMatchesAndPredictions()
     setSaving(null)
+  }
+
+  async function handleDouble(matchId: string) {
+    if (!profile || doubleUses.has(matchId) || powerUps.double <= 0) return
+
+    const { error } = await supabase
+      .from('power_ups')
+      .update({ uses_remaining: powerUps.double - 1 })
+      .eq('user_id', profile.id)
+      .eq('type', 'double')
+    if (error) return
+
+    await supabase.from('power_up_uses').insert({ user_id: profile.id, match_id: matchId, type: 'double' })
+    setPowerUps(prev => ({ ...prev, double: prev.double - 1 }))
+    setDoubleUses(prev => new Set([...prev, matchId]))
+  }
+
+  async function handleSpy(matchId: string, targetUserId: string) {
+    if (!profile || powerUps.spy <= 0) return
+
+    const targetProfile = leagueProfiles.find(p => p.id === targetUserId)
+    const targetName = targetProfile?.full_name?.split(' ')[0] || '?'
+
+    const { error } = await supabase
+      .from('power_ups')
+      .update({ uses_remaining: powerUps.spy - 1 })
+      .eq('user_id', profile.id)
+      .eq('type', 'spy')
+    if (error) return
+
+    await supabase.from('power_up_uses').insert({
+      user_id: profile.id,
+      match_id: matchId,
+      type: 'spy',
+      target_user_id: targetUserId,
+    })
+
+    const { data: pred } = await supabase
+      .from('predictions')
+      .select('predicted_home, predicted_away')
+      .eq('user_id', targetUserId)
+      .eq('match_id', matchId)
+      .maybeSingle()
+
+    setPowerUps(prev => ({ ...prev, spy: prev.spy - 1 }))
+    setSpyResults(prev => ({
+      ...prev,
+      [matchId]: {
+        targetName,
+        predicted_home: pred?.predicted_home ?? null,
+        predicted_away: pred?.predicted_away ?? null,
+      },
+    }))
+    setSpyModalOpen(null)
   }
 
   function setInput(matchId: string, field: 'home' | 'away', value: string) {
@@ -116,11 +232,21 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
   const upcoming = matches.filter(m => !isLocked(m))
   const locked = matches.filter(m => isLocked(m))
 
+  const spyTargets = leagueProfiles.filter(p =>
+    p.id !== profile?.id &&
+    (!activeMemberIds || activeMemberIds.includes(p.id))
+  )
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-bold text-dark mb-1">Mes pronostics</h2>
-        <p className="text-sm text-gray-500">Score exact : 7 pts · Bon résultat + partiel : 4 pts · Bon résultat : 3 pts · Partiel : 1 pt</p>
+        <h2 className="text-lg font-bold text-dark mb-2">Mes pronostics</h2>
+        <div className="text-sm text-gray-500 space-y-0.5">
+          <div>🎯 Score exact : <span className="font-semibold text-dark">7 pts</span></div>
+          <div>✅ Bon résultat + 1 score partiel : <span className="font-semibold text-dark">4 pts</span></div>
+          <div>✅ Bon résultat uniquement : <span className="font-semibold text-dark">3 pts</span></div>
+          <div>〽️ 1 score partiel : <span className="font-semibold text-dark">1 pt</span></div>
+        </div>
       </div>
 
       {upcoming.length === 0 && locked.length === 0 && (
@@ -152,6 +278,10 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
               : derivedWinner === 'draw'
               ? 'Match nul'
               : null
+
+            const isDoubleActive = doubleUses.has(match.id)
+            const spyResult = spyResults[match.id]
+            const isSpyDone = !!spyResult
 
             return (
               <div key={match.id} className="card card-hover rounded-2xl overflow-hidden">
@@ -199,20 +329,100 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                     <span className={`text-xs font-medium transition-all ${winnerLabel ? 'text-primary' : 'text-gray-300'}`}>
                       {winnerLabel ? `→ ${winnerLabel}` : '→ Saisir un score'}
                     </span>
-                    <button
-                      onClick={() => handleSave(match)}
-                      disabled={!canSave || saving === match.id}
-                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition ${
-                        isSaved && !isDirty
-                          ? 'bg-green-50 text-green-600 border border-green-200'
-                          : canSave
-                          ? 'bg-primary text-white hover:bg-primary/90 shadow-sm shadow-primary/20'
-                          : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      {saving === match.id ? 'Sauvegarde…' : isSaved && !isDirty ? '✓ Enregistré' : 'Valider'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleSave(match)}
+                        disabled={!canSave || saving === match.id}
+                        className={`px-4 py-2 rounded-lg text-xs font-semibold transition ${
+                          isSaved && !isDirty
+                            ? 'bg-green-50 text-green-600 border border-green-200'
+                            : canSave
+                            ? 'bg-primary text-white hover:bg-primary/90 shadow-sm shadow-primary/20'
+                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                        }`}
+                      >
+                        {saving === match.id ? 'Sauvegarde…' : isSaved && !isDirty ? '✓ Enregistré' : 'Valider'}
+                      </button>
+
+                      {/* Double Score button */}
+                      <div className="relative">
+                        <button
+                          onClick={() => handleDouble(match.id)}
+                          disabled={powerUps.double <= 0 || isDoubleActive}
+                          title={isDoubleActive ? 'Double score activé !' : `×2 Score (${powerUps.double} restant${powerUps.double > 1 ? 's' : ''})`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                            isDoubleActive
+                              ? 'bg-green-100 text-green-600 cursor-default'
+                              : powerUps.double > 0
+                              ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
+                              : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                          }`}
+                        >
+                          {isDoubleActive ? '✓' : '×2'}
+                        </button>
+                        {!isDoubleActive && (
+                          <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
+                            {powerUps.double}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Spy button */}
+                      <div className="relative">
+                        <button
+                          onClick={() => !isSpyDone && setSpyModalOpen(spyModalOpen === match.id ? null : match.id)}
+                          disabled={powerUps.spy <= 0 && !isSpyDone}
+                          title={isSpyDone ? 'Espion utilisé' : `Espionner un joueur (${powerUps.spy} restant${powerUps.spy > 1 ? 's' : ''})`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-base transition ${
+                            isSpyDone
+                              ? 'bg-blue-100 cursor-default'
+                              : powerUps.spy > 0
+                              ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
+                              : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                          }`}
+                        >
+                          🔍
+                        </button>
+                        {!isSpyDone && (
+                          <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
+                            {powerUps.spy}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Spy result */}
+                  {spyResult && (
+                    <div className="mt-2 text-xs text-gray-500 flex items-center gap-1 flex-wrap">
+                      <span>🔍 Prono de <span className="font-medium text-dark">{spyResult.targetName}</span> :</span>
+                      {spyResult.predicted_home !== null
+                        ? <span className="font-bold text-dark">{spyResult.predicted_home}–{spyResult.predicted_away}</span>
+                        : <span className="italic">{spyResult.targetName} n'a pas encore pronostiqué ce match</span>
+                      }
+                    </div>
+                  )}
+
+                  {/* Spy modal */}
+                  {spyModalOpen === match.id && (
+                    <div className="mt-3 bg-gray-50 rounded-xl p-3 border border-gray-100">
+                      <p className="text-xs font-medium text-gray-500 mb-2">Choisir qui espionner :</p>
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                        {spyTargets.map(target => (
+                          <button
+                            key={target.id}
+                            onClick={() => handleSpy(match.id, target.id)}
+                            className="w-full text-left px-3 py-1.5 text-sm text-dark hover:bg-white rounded-lg transition"
+                          >
+                            {target.full_name}
+                          </button>
+                        ))}
+                        {spyTargets.length === 0 && (
+                          <p className="text-xs text-gray-400 italic px-1">Aucun membre dans votre ligue active</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )

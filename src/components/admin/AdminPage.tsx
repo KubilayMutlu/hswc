@@ -127,8 +127,16 @@ export default function AdminPage() {
               .eq('match_id', match.id)
 
             if (preds) {
+              const { data: doubleUses } = await supabase
+                .from('power_up_uses')
+                .select('user_id')
+                .eq('match_id', match.id)
+                .eq('type', 'double')
+              const doubleUserIds = new Set(doubleUses?.map((u: any) => u.user_id) ?? [])
+
               for (const pred of preds) {
-                const points = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
+                const base = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
+                const points = base * (doubleUserIds.has(pred.user_id) ? 2 : 1)
                 totalPoints += points
                 await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
               }
@@ -172,8 +180,16 @@ export default function AdminPage() {
 
     const { data: preds } = await supabase.from('predictions').select('*').eq('match_id', match.id)
     if (preds) {
+      const { data: doubleUses } = await supabase
+        .from('power_up_uses')
+        .select('user_id')
+        .eq('match_id', match.id)
+        .eq('type', 'double')
+      const doubleUserIds = new Set(doubleUses?.map((u: any) => u.user_id) ?? [])
+
       for (const pred of preds) {
-        const points = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
+        const base = calcPoints(pred.predicted_home, pred.predicted_away, pred.predicted_winner, scoreHome, scoreAway, actualWinner)
+        const points = base * (doubleUserIds.has(pred.user_id) ? 2 : 1)
         await supabase.from('predictions').update({ points_earned: points }).eq('id', pred.id)
       }
     }
