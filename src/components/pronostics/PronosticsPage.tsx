@@ -27,7 +27,7 @@ interface SpyResult {
 }
 
 interface ConfirmModal {
-  type: 'double' | 'cancel-double' | 'spy'
+  type: 'double' | 'spy'
   matchId: string
   targetUserId?: string
   targetName?: string
@@ -214,33 +214,6 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     setDoubleUses(prev => new Set([...prev, matchId]))
   }
 
-  async function handleCancelDouble(matchId: string) {
-    if (!profile) return
-
-    const { error } = await supabase
-      .from('power_up_uses')
-      .delete()
-      .eq('user_id', profile.id)
-      .eq('match_id', matchId)
-      .eq('type', 'double')
-
-    if (error) {
-      console.error('[cancelDouble] DELETE error:', error)
-      return
-    }
-
-    await supabase
-      .from('power_ups')
-      .update({ uses_remaining: powerUps.double + 1 })
-      .eq('user_id', profile.id)
-      .eq('type', 'double')
-
-    // Update local state directly — no loadPowerUps() which triggers a
-    // setDoubleUses(fetched) that can race and re-add matchId
-    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
-    setPowerUps(prev => ({ ...prev, double: prev.double + 1 }))
-  }
-
   async function handleSpy(matchId: string, targetUserId: string) {
     if (!profile || powerUps.spy <= 0) return
     const targetProfile = leagueProfiles.find(p => p.id === targetUserId)
@@ -276,7 +249,6 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
     const { type, matchId, targetUserId } = confirmModal
     setConfirmModal(null)
     if (type === 'double') await handleDouble(matchId)
-    else if (type === 'cancel-double') await handleCancelDouble(matchId)
     else if (type === 'spy' && targetUserId) await handleSpy(matchId, targetUserId)
   }
 
@@ -296,10 +268,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
 
   const confirmDescriptions: Record<string, string> = {}
   if (confirmModal?.type === 'double') {
-    confirmDescriptions['double'] = `Les points que tu gagnes sur ce match seront doublés. Tu utiliseras 1 atout Double Score (il t'en restera ${powerUps.double - 1}). Cette action peut être annulée avant le coup d'envoi.`
-  }
-  if (confirmModal?.type === 'cancel-double') {
-    confirmDescriptions['cancel-double'] = "Annuler le double score sur ce match ? Tu récupèreras 1 atout Double Score."
+    confirmDescriptions['double'] = `Les points que tu gagnes sur ce match seront doublés. Tu utiliseras 1 atout Double Score (il t'en restera ${powerUps.double - 1}). Cette action est irréversible.`
   }
   if (confirmModal?.type === 'spy') {
     confirmDescriptions['spy'] = `Tu vas révéler le pronostic de ${confirmModal.targetName} sur ce match. Tu utiliseras 1 atout Espion (il t'en restera ${powerUps.spy - 1}). Cette action est définitive.`
@@ -402,37 +371,26 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
                         {saving === match.id ? 'Sauvegarde…' : isSaved && !isDirty ? '✓ Enregistré' : 'Valider'}
                       </button>
 
-                      {/* Double Score button + cancel × */}
-                      <div className="flex items-center gap-1">
-                        <div className="relative">
-                          <button
-                            onClick={() => !isDoubleActive && setConfirmModal({ type: 'double', matchId: match.id })}
-                            disabled={!isDoubleActive && powerUps.double <= 0}
-                            title={isDoubleActive ? 'Double score activé !' : `×2 Score (${powerUps.double} restant${powerUps.double > 1 ? 's' : ''})`}
-                            className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
-                              isDoubleActive
-                                ? 'bg-green-100 text-green-600 cursor-default'
-                                : powerUps.double > 0
-                                ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
-                                : 'bg-gray-100 text-gray-300 cursor-not-allowed'
-                            }`}
-                          >
-                            {isDoubleActive ? '✓' : '×2'}
-                          </button>
-                          {!isDoubleActive && (
-                            <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
-                              {powerUps.double}
-                            </span>
-                          )}
-                        </div>
-                        {isDoubleActive && (
-                          <button
-                            onClick={() => setConfirmModal({ type: 'cancel-double', matchId: match.id })}
-                            title="Annuler le double score"
-                            className="w-5 h-5 rounded-full bg-gray-100 text-gray-400 hover:bg-red-100 hover:text-red-400 text-xs font-bold flex items-center justify-center transition leading-none"
-                          >
-                            ×
-                          </button>
+                      {/* Double Score button */}
+                      <div className="relative">
+                        <button
+                          onClick={() => !isDoubleActive && setConfirmModal({ type: 'double', matchId: match.id })}
+                          disabled={!isDoubleActive && powerUps.double <= 0}
+                          title={isDoubleActive ? 'Double score activé !' : `×2 Score (${powerUps.double} restant${powerUps.double > 1 ? 's' : ''})`}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition ${
+                            isDoubleActive
+                              ? 'bg-green-100 text-green-600 cursor-default'
+                              : powerUps.double > 0
+                              ? 'bg-violet-100 text-violet-600 hover:bg-violet-200 cursor-pointer'
+                              : 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                          }`}
+                        >
+                          {isDoubleActive ? '✓' : '×2'}
+                        </button>
+                        {!isDoubleActive && (
+                          <span className="absolute -bottom-1 -right-1 w-4 h-4 bg-primary text-white rounded-full text-[9px] flex items-center justify-center font-bold pointer-events-none">
+                            {powerUps.double}
+                          </span>
                         )}
                       </div>
 
@@ -545,19 +503,14 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
           <div className="relative bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
             <div className="text-center mb-4">
               <div className="text-3xl mb-2">
-                {confirmModal.type === 'double' ? '×2'
-                  : confirmModal.type === 'cancel-double' ? '🚫'
-                  : '🔍'}
+                {confirmModal.type === 'double' ? '×2' : '🔍'}
               </div>
               <h3 className="font-bold text-dark text-base">
-                {confirmModal.type === 'double' ? '×2 Double Score'
-                  : confirmModal.type === 'cancel-double' ? 'Annuler le double score'
-                  : '🔍 Espionner un joueur'}
+                {confirmModal.type === 'double' ? '×2 Double Score' : '🔍 Espionner un joueur'}
               </h3>
             </div>
             <p className="text-sm text-gray-600 mb-6 text-center leading-relaxed">
               {confirmModal.type === 'double' && confirmDescriptions['double']}
-              {confirmModal.type === 'cancel-double' && confirmDescriptions['cancel-double']}
               {confirmModal.type === 'spy' && confirmDescriptions['spy']}
             </p>
             <div className="flex gap-3">
@@ -569,11 +522,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
               </button>
               <button
                 onClick={handleConfirm}
-                className={`flex-1 px-4 py-2.5 rounded-xl font-semibold text-sm transition ${
-                  confirmModal.type === 'cancel-double'
-                    ? 'bg-red-500 text-white hover:bg-red-600'
-                    : 'bg-primary text-white hover:bg-primary/90'
-                }`}
+                className="flex-1 px-4 py-2.5 rounded-xl bg-primary text-white font-semibold text-sm hover:bg-primary/90 transition"
               >
                 Confirmer
               </button>
