@@ -9,6 +9,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'classement', label: 'Classement', icon: '🏆' },
   { id: 'pronostics', label: 'Pronostics', icon: '🎯' },
   { id: 'matchs', label: 'Matchs', icon: '⚽' },
+  { id: 'standings', label: 'Classements', icon: '📊' },
   { id: 'defis', label: 'Défis', icon: '🔥' },
   { id: 'ligues', label: 'Ligues', icon: '🌐' },
 ]

@@ -11,8 +11,9 @@ import MatchsPage from '@/components/matchs/MatchsPage'
 import DefisPage from '@/components/defis/DefisPage'
 import AdminPage from '@/components/admin/AdminPage'
 import LeaguesPage from '@/components/leagues/LeaguesPage'
+import StandingsPage from '@/components/standings/StandingsPage'
 
-export type Tab = 'classement' | 'pronostics' | 'matchs' | 'defis' | 'ligues'
+export type Tab = 'classement' | 'pronostics' | 'matchs' | 'standings' | 'defis' | 'ligues'
 
 function App() {
   const [session, setSession] = useState<any>(null)
@@ -109,6 +110,7 @@ function App() {
           {activeTab === 'classement' && <ClassementPage profile={profile} />}
           {activeTab === 'pronostics' && <PronosticsPage profile={profile} />}
           {activeTab === 'matchs' && <MatchsPage profile={profile} />}
+          {activeTab === 'standings' && <StandingsPage />}
           {activeTab === 'defis' && <DefisPage profile={profile} />}
           {activeTab === 'ligues' && <LeaguesPage profile={profile} />}
         </main>
