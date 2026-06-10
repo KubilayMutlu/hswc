@@ -217,53 +217,28 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
   async function handleCancelDouble(matchId: string) {
     if (!profile) return
 
-    console.log('[cancelDouble] DELETE power_up_uses — userId:', profile.id, 'matchId:', matchId)
-
-    const { data: deleted, error } = await supabase
+    const { error } = await supabase
       .from('power_up_uses')
       .delete()
       .eq('user_id', profile.id)
       .eq('match_id', matchId)
       .eq('type', 'double')
-      .select()
-
-    console.log('[cancelDouble] result — error:', error, 'deleted rows:', deleted)
 
     if (error) {
-      console.error('[cancelDouble] DELETE failed with error:', error)
+      console.error('[cancelDouble] DELETE error:', error)
       return
     }
 
-    const rowWasDeleted = deleted && deleted.length > 0
-
-    if (!rowWasDeleted) {
-      console.warn(
-        '[cancelDouble] DELETE returned 0 rows — RLS policy missing.\n' +
-        'Run in Supabase SQL editor:\n' +
-        "create policy \"Users can delete their own power up uses\" on power_up_uses for delete to authenticated using (auth.uid() = user_id);"
-      )
-    }
-
-    // Optimistic state update — always apply so UI responds immediately
-    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
-
-    // Refund uses_remaining
-    const { error: updateErr } = await supabase
+    await supabase
       .from('power_ups')
       .update({ uses_remaining: powerUps.double + 1 })
       .eq('user_id', profile.id)
       .eq('type', 'double')
-    console.log('[cancelDouble] power_ups update error:', updateErr)
 
-    if (rowWasDeleted) {
-      // Row was actually deleted — safe to refetch (won't re-add matchId)
-      await loadPowerUps()
-    } else {
-      // Row still exists in DB (RLS blocked) — only update the uses_remaining count
-      // in local state so the badge is correct, skip loadPowerUps which would
-      // re-add the matchId to doubleUses and undo our optimistic removal
-      setPowerUps(prev => ({ ...prev, double: prev.double + 1 }))
-    }
+    // Update local state directly — no loadPowerUps() which triggers a
+    // setDoubleUses(fetched) that can race and re-add matchId
+    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
+    setPowerUps(prev => ({ ...prev, double: prev.double + 1 }))
   }
 
   async function handleSpy(matchId: string, targetUserId: string) {
