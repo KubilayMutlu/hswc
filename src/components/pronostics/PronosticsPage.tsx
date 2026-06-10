@@ -231,6 +231,7 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
       .update({ uses_remaining: powerUps.double + 1 })
       .eq('user_id', profile.id)
       .eq('type', 'double')
+    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
     await loadPowerUps()
   }
 

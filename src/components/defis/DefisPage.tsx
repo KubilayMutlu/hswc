@@ -33,8 +33,8 @@ interface TeamStat {
 
 type TourneyType = TournamentPrediction['type']
 
-// WC 2026 first match: June 11 2026, 20:00 Paris = 18:00 UTC
-const TOURNAMENT_CUTOFF = new Date('2026-06-11T18:00:00Z')
+// Votes open until June 17 2026, midnight Paris = 22:00 UTC
+const TOURNAMENT_CUTOFF = new Date('2026-06-17T22:00:00Z')
 
 const TOURNAMENT_DEFIS: Array<{ type: TourneyType; icon: string; title: string; description: string; placeholder: string }> = [
   { type: 'world_cup_winner',   icon: '🏆', title: 'Vainqueur de la Coupe du Monde', description: "Prédit l'équipe qui remportera le titre. +20 pts si correct.",                                              placeholder: 'Ex: France' },
@@ -245,6 +245,10 @@ export default function DefisPage({ profile }: DefisPageProps) {
       {/* Tournament defis */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Défis Tournoi</h3>
+        <div className="flex items-center gap-2 text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2 mb-3">
+          <span>⏰</span>
+          <span>Les votes sont ouverts jusqu'au <strong className="text-gray-600">17 juin 2026 à minuit</strong>. Après cette date, plus aucune modification ne sera possible.</span>
+        </div>
         {TOURNAMENT_DEFIS.map(defi => {
           const myPred = tournamentPreds[defi.type]
           const count = tournamentCounts[defi.type]
