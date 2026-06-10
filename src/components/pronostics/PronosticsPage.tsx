@@ -222,14 +222,16 @@ export default function PronosticsPage({ profile }: PronosticsPageProps) {
       .eq('user_id', profile.id)
       .eq('match_id', matchId)
       .eq('type', 'double')
-    if (error) return
+    if (error) {
+      console.error('Cancel double error:', error)
+      return
+    }
     await supabase
       .from('power_ups')
       .update({ uses_remaining: powerUps.double + 1 })
       .eq('user_id', profile.id)
       .eq('type', 'double')
-    setPowerUps(prev => ({ ...prev, double: prev.double + 1 }))
-    setDoubleUses(prev => { const n = new Set(prev); n.delete(matchId); return n })
+    await loadPowerUps()
   }
 
   async function handleSpy(matchId: string, targetUserId: string) {

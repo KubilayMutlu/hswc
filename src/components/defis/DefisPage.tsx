@@ -31,25 +31,24 @@ interface TeamStat {
   stat: string
 }
 
-// WC 2026 first match: June 11 2026, 20:00 Paris time = 18:00 UTC
+type TourneyType = TournamentPrediction['type']
+
+// WC 2026 first match: June 11 2026, 20:00 Paris = 18:00 UTC
 const TOURNAMENT_CUTOFF = new Date('2026-06-11T18:00:00Z')
 
-const TOURNAMENT_DEFIS = [
-  {
-    type: 'top_scorer' as const,
-    icon: '🥇',
-    title: 'Meilleur buteur',
-    description: 'Prédit le joueur qui marquera le plus de buts. +20 pts si correct.',
-    placeholder: 'Ex: Kylian Mbappé',
-  },
-  {
-    type: 'top_assist' as const,
-    icon: '🎯',
-    title: 'Meilleur passeur',
-    description: 'Prédit le joueur qui délivrera le plus de passes décisives. +20 pts si correct.',
-    placeholder: 'Ex: Lamine Yamal',
-  },
+const TOURNAMENT_DEFIS: Array<{ type: TourneyType; icon: string; title: string; description: string; placeholder: string }> = [
+  { type: 'world_cup_winner',   icon: '🏆', title: 'Vainqueur de la Coupe du Monde', description: "Prédit l'équipe qui remportera le titre. +20 pts si correct.",                                              placeholder: 'Ex: France' },
+  { type: 'top_scorer',        icon: '🥇', title: 'Meilleur buteur',                description: 'Prédit le joueur qui marquera le plus de buts. +20 pts si correct.',                                        placeholder: 'Ex: Kylian Mbappé' },
+  { type: 'top_assist',        icon: '🎯', title: 'Meilleur passeur',               description: 'Prédit le joueur qui délivrera le plus de passes décisives. +20 pts si correct.',                           placeholder: 'Ex: Lamine Yamal' },
+  { type: 'top_scoring_team',  icon: '⚽', title: 'Équipe la plus prolifique',      description: "Prédit l'équipe qui marquera le plus de buts dans le tournoi. +20 pts si correct.",                         placeholder: 'Ex: Espagne' },
+  { type: 'most_conceded_team',icon: '🥅', title: 'Équipe la plus poreuse',         description: "Prédit l'équipe qui encaissera le plus de buts dans le tournoi. +20 pts si correct.",                       placeholder: 'Ex: Arabie Saoudite' },
+  { type: 'worst_group_team',  icon: '😬', title: 'Pire équipe des poules',         description: "Prédit l'équipe qui finira dernière de son groupe avec le pire bilan. +20 pts si correct.",                 placeholder: 'Ex: Canada' },
 ]
+
+const EMPTY_PREDS = Object.fromEntries(TOURNAMENT_DEFIS.map(d => [d.type, null])) as Record<TourneyType, TournamentPrediction | null>
+const EMPTY_COUNTS = Object.fromEntries(TOURNAMENT_DEFIS.map(d => [d.type, 0])) as Record<TourneyType, number>
+const EMPTY_INPUTS = Object.fromEntries(TOURNAMENT_DEFIS.map(d => [d.type, ''])) as Record<TourneyType, string>
+const EMPTY_VOTES = Object.fromEntries(TOURNAMENT_DEFIS.map(d => [d.type, []])) as unknown as Record<TourneyType, Array<{ name: string; initials: string; prediction: string }>>
 
 export default function DefisPage({ profile }: DefisPageProps) {
   const [challenges, setChallenges] = useState<Challenge[]>([])
@@ -57,14 +56,12 @@ export default function DefisPage({ profile }: DefisPageProps) {
   const [loading, setLoading] = useState(true)
   const { activeMemberIds } = useLeague()
 
-  // Tournament defis state
-  const [tournamentPreds, setTournamentPreds] = useState<{
-    top_scorer: TournamentPrediction | null
-    top_assist: TournamentPrediction | null
-  }>({ top_scorer: null, top_assist: null })
-  const [tournamentCounts, setTournamentCounts] = useState({ top_scorer: 0, top_assist: 0 })
+  const [tournamentPreds, setTournamentPreds] = useState<Record<TourneyType, TournamentPrediction | null>>(EMPTY_PREDS)
+  const [tournamentCounts, setTournamentCounts] = useState<Record<TourneyType, number>>(EMPTY_COUNTS)
   const [leagueMemberCount, setLeagueMemberCount] = useState(0)
-  const [tournamentInputs, setTournamentInputs] = useState({ top_scorer: '', top_assist: '' })
+  const [tournamentInputs, setTournamentInputs] = useState<Record<TourneyType, string>>(EMPTY_INPUTS)
+  const [tournamentVotes, setTournamentVotes] = useState<Record<TourneyType, Array<{ name: string; initials: string; prediction: string }>>>(EMPTY_VOTES)
+  const [showVotes, setShowVotes] = useState<Set<string>>(new Set())
   const [savingTournament, setSavingTournament] = useState<string | null>(null)
   const [editingTournament, setEditingTournament] = useState<Set<string>>(new Set())
 
@@ -79,35 +76,58 @@ export default function DefisPage({ profile }: DefisPageProps) {
     if (!profile?.id) return
 
     const [profilesRes, predsRes] = await Promise.all([
-      supabase.from('profiles').select('id'),
+      supabase.from('profiles').select('id, full_name, avatar_initials'),
       supabase.from('tournament_predictions').select('*'),
     ])
 
-    const leagueIds = memberIds || profilesRes.data?.map((p: any) => p.id) || []
+    const allProfilesData = profilesRes.data || []
+    const leagueIds = memberIds || allProfilesData.map((p: any) => p.id)
     const allPreds: TournamentPrediction[] = predsRes.data || []
 
-    const myTopScorer = allPreds.find(p => p.user_id === profile.id && p.type === 'top_scorer') ?? null
-    const myTopAssist = allPreds.find(p => p.user_id === profile.id && p.type === 'top_assist') ?? null
+    const myPreds = Object.fromEntries(
+      TOURNAMENT_DEFIS.map(d => [
+        d.type,
+        allPreds.find(p => p.user_id === profile.id && p.type === d.type) ?? null,
+      ])
+    ) as Record<TourneyType, TournamentPrediction | null>
 
-    setTournamentPreds({ top_scorer: myTopScorer, top_assist: myTopAssist })
-    setTournamentCounts({
-      top_scorer: allPreds.filter(p => leagueIds.includes(p.user_id) && p.type === 'top_scorer').length,
-      top_assist: allPreds.filter(p => leagueIds.includes(p.user_id) && p.type === 'top_assist').length,
-    })
+    const counts = Object.fromEntries(
+      TOURNAMENT_DEFIS.map(d => [
+        d.type,
+        allPreds.filter(p => leagueIds.includes(p.user_id) && p.type === d.type).length,
+      ])
+    ) as Record<TourneyType, number>
+
+    const votes = Object.fromEntries(
+      TOURNAMENT_DEFIS.map(d => [
+        d.type,
+        allPreds
+          .filter(p => leagueIds.includes(p.user_id) && p.type === d.type)
+          .map(p => {
+            const pr = allProfilesData.find((x: any) => x.id === p.user_id)
+            return {
+              name: pr?.full_name?.split(' ')[0] || '?',
+              initials: pr?.avatar_initials || '?',
+              prediction: p.prediction,
+            }
+          }),
+      ])
+    ) as Record<TourneyType, Array<{ name: string; initials: string; prediction: string }>>
+
+    setTournamentPreds(myPreds)
+    setTournamentCounts(counts)
+    setTournamentVotes(votes)
     setLeagueMemberCount(leagueIds.length)
   }
 
-  async function saveTournamentPred(type: 'top_scorer' | 'top_assist') {
+  async function saveTournamentPred(type: TourneyType) {
     if (!profile?.id) return
     const value = tournamentInputs[type].trim()
     if (!value) return
     setSavingTournament(type)
 
     await supabase.from('tournament_predictions').upsert({
-      user_id: profile.id,
-      type,
-      prediction: value,
-      is_correct: false,
+      user_id: profile.id, type, prediction: value, is_correct: false,
     }, { onConflict: 'user_id,type' })
 
     setEditingTournament(prev => { const n = new Set(prev); n.delete(type); return n })
@@ -115,10 +135,19 @@ export default function DefisPage({ profile }: DefisPageProps) {
     setSavingTournament(null)
   }
 
-  function startEditing(type: 'top_scorer' | 'top_assist') {
+  function startEditing(type: TourneyType) {
     const pred = tournamentPreds[type]
     if (pred) setTournamentInputs(prev => ({ ...prev, [type]: pred.prediction }))
     setEditingTournament(prev => new Set([...prev, type]))
+  }
+
+  function toggleVotes(type: TourneyType) {
+    setShowVotes(prev => {
+      const n = new Set(prev)
+      if (n.has(type)) n.delete(type)
+      else n.add(type)
+      return n
+    })
   }
 
   async function computeChallenges(memberIds: string[] | null) {
@@ -129,9 +158,7 @@ export default function DefisPage({ profile }: DefisPageProps) {
 
     if (!allProfiles || !predictions || !matches) { setLoading(false); return }
 
-    const profiles = memberIds
-      ? allProfiles.filter(p => memberIds.includes(p.id))
-      : allProfiles
+    const profiles = memberIds ? allProfiles.filter(p => memberIds.includes(p.id)) : allProfiles
 
     function bestUser(scorer: (uid: string) => number): ChallengeResult | null {
       let best: { uid: string; score: number } | null = null
@@ -141,73 +168,43 @@ export default function DefisPage({ profile }: DefisPageProps) {
       }
       if (!best || best.score === 0) return null
       const profile = profiles.find(p => p.id === best!.uid)
-      return {
-        leader_name: profile?.full_name || '?',
-        leader_initials: profile?.avatar_initials || '?',
-        score: best.score,
-      }
+      return { leader_name: profile?.full_name || '?', leader_initials: profile?.avatar_initials || '?', score: best.score }
     }
 
     const groupPhases = ['Groupe A','Groupe B','Groupe C','Groupe D','Groupe E','Groupe F','Groupe G','Groupe H','Phase de groupes']
     const groupMatchIds = matches.filter(m => groupPhases.some(g => m.phase?.includes(g))).map(m => m.id)
     const r16MatchIds = matches.filter(m => m.phase?.includes('8e')).map(m => m.id)
     const sfMatchIds = matches.filter(m => m.phase?.includes('demi') || m.phase?.includes('Demi')).map(m => m.id)
-    const finalMatchIds = matches.filter(m => m.phase?.toLowerCase().includes('final') && !m.phase?.toLowerCase().includes('demi')).map(m => m.id)
     const finishedMatchIds = matches.filter(m => m.is_finished).map(m => m.id)
 
-    const roiGroupes = bestUser(uid =>
-      predictions.filter(p => p.user_id === uid && groupMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    )
-    const sniper = bestUser(uid =>
-      predictions.filter(p => p.user_id === uid && p.points_earned >= 7).length
-    )
+    const roiGroupes = bestUser(uid => predictions.filter(p => p.user_id === uid && groupMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0))
+    const sniper = bestUser(uid => predictions.filter(p => p.user_id === uid && p.points_earned >= 7).length)
     const serie = bestUser(uid => {
-      const matchesSorted = matches.filter(m => m.is_finished).sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime())
-      let maxStreak = 0, cur = 0
-      for (const m of matchesSorted) {
+      const sorted = matches.filter(m => m.is_finished).sort((a, b) => new Date(a.kickoff_at).getTime() - new Date(b.kickoff_at).getTime())
+      let max = 0, cur = 0
+      for (const m of sorted) {
         const p = predictions.find(pr => pr.user_id === uid && pr.match_id === m.id)
-        if (p && p.points_earned > 0) { cur++; maxStreak = Math.max(maxStreak, cur) }
-        else { cur = 0 }
+        if (p && p.points_earned > 0) { cur++; max = Math.max(max, cur) } else { cur = 0 }
       }
-      return maxStreak
+      return max
     })
-    const maitre8 = bestUser(uid =>
-      predictions.filter(p => p.user_id === uid && r16MatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    )
-    const oracleDemis = bestUser(uid =>
-      predictions.filter(p => p.user_id === uid && sfMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0)
-    )
+    const maitre8 = bestUser(uid => predictions.filter(p => p.user_id === uid && r16MatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0))
+    const oracleDemis = bestUser(uid => predictions.filter(p => p.user_id === uid && sfMatchIds.includes(p.match_id)).reduce((s, p) => s + (p.points_earned || 0), 0))
     const oraclePercent = bestUser(uid => {
       const userPreds = predictions.filter(p => p.user_id === uid && finishedMatchIds.includes(p.match_id))
       if (userPreds.length < 3) return 0
-      const correct = userPreds.filter(p => (p.points_earned || 0) >= 3).length
-      return Math.round((correct / userPreds.length) * 100)
+      return Math.round((userPreds.filter(p => (p.points_earned || 0) >= 3).length / userPreds.length) * 100)
     })
-
-    let champion: ChallengeResult | null = null
-    const finalMatch = matches.find(m => finalMatchIds.includes(m.id) && m.is_finished)
-    if (finalMatch) {
-      const actualWinner = finalMatch.score_home! > finalMatch.score_away! ? 'home' : finalMatch.score_away! > finalMatch.score_home! ? 'away' : 'draw'
-      const winners = predictions.filter(p =>
-        p.match_id === finalMatch.id && p.predicted_winner === actualWinner && profiles.some(pr => pr.id === p.user_id)
-      )
-      if (winners.length > 0) {
-        const first = winners[0]
-        const p = profiles.find(pr => pr.id === first.user_id)
-        champion = { leader_name: p?.full_name || '?', leader_initials: p?.avatar_initials || '?', score: '✓' }
-      }
-    }
 
     const addScore = (r: ChallengeResult | null, suffix: string) => r ? { ...r, score: `${r.score}${suffix}` } : null
 
     setChallenges([
-      { id: 'roi-groupes', title: 'Roi des groupes', description: 'Le plus de points sur la phase de groupes', icon: '👑', result: addScore(roiGroupes, ' pts') },
-      { id: 'sniper', title: 'Sniper ultime', description: 'Le plus grand nombre de scores exacts', icon: '🎯', result: addScore(sniper, ' exacts') },
-      { id: 'serie', title: 'Série en feu', description: 'La plus longue série de vainqueurs corrects consécutifs', icon: '🔥', result: addScore(serie, ' de suite') },
-      { id: 'maitre-8', title: 'Maître des 8es', description: 'Le plus de points sur les 8es de finale', icon: '⚔️', result: addScore(maitre8, ' pts') },
-      { id: 'oracle-demis', title: 'Oracle des demis', description: 'Le plus de points sur les demi-finales', icon: '🔮', result: addScore(oracleDemis, ' pts') },
-      { id: 'oracle-global', title: 'Voyant', description: 'Le meilleur % de vainqueurs corrects (min. 3 matchs)', icon: '👁️', result: addScore(oraclePercent, '%') },
-      { id: 'champion', title: 'Champion du monde', description: 'A correctement pronostiqué le vainqueur final', icon: '🏆', result: champion },
+      { id: 'roi-groupes',   title: 'Roi des groupes',   description: 'Le plus de points sur la phase de groupes',                    icon: '👑', result: addScore(roiGroupes, ' pts') },
+      { id: 'sniper',        title: 'Sniper ultime',     description: 'Le plus grand nombre de scores exacts',                         icon: '🎯', result: addScore(sniper, ' exacts') },
+      { id: 'serie',         title: 'Série en feu',      description: 'La plus longue série de vainqueurs corrects consécutifs',       icon: '🔥', result: addScore(serie, ' de suite') },
+      { id: 'maitre-8',      title: 'Maître des 8es',    description: 'Le plus de points sur les 8es de finale',                       icon: '⚔️', result: addScore(maitre8, ' pts') },
+      { id: 'oracle-demis',  title: 'Oracle des demis',  description: 'Le plus de points sur les demi-finales',                        icon: '🔮', result: addScore(oracleDemis, ' pts') },
+      { id: 'oracle-global', title: 'Voyant',            description: 'Le meilleur % de vainqueurs corrects (min. 3 matchs)',          icon: '👁️', result: addScore(oraclePercent, '%') },
     ])
 
     // Team stats
@@ -226,8 +223,8 @@ export default function DefisPage({ profile }: DefisPageProps) {
       newTeamStats.push({ id: 'top-attack', title: 'Équipe en feu', icon: '⚽', description: "L'équipe ayant marqué le plus de buts", teamName: topAttack.team, teamFlag: topAttack.flag, stat: `${topAttack.scored} buts marqués` })
       const qualified = teamList.filter(t => t.played >= 2)
       if (qualified.length > 0) {
-        const bestDefense = [...qualified].sort((a, b) => a.conceded - b.conceded)[0]
-        newTeamStats.push({ id: 'best-defense', title: 'Forteresse', icon: '🛡️', description: "L'équipe ayant le moins encaissé (min. 2 matchs)", teamName: bestDefense.team, teamFlag: bestDefense.flag, stat: `${bestDefense.conceded} buts encaissés` })
+        const bestDef = [...qualified].sort((a, b) => a.conceded - b.conceded)[0]
+        newTeamStats.push({ id: 'best-defense', title: 'Forteresse', icon: '🛡️', description: "L'équipe ayant le moins encaissé (min. 2 matchs)", teamName: bestDef.team, teamFlag: bestDef.flag, stat: `${bestDef.conceded} buts encaissés` })
       }
     }
     setTeamStats(newTeamStats)
@@ -251,9 +248,11 @@ export default function DefisPage({ profile }: DefisPageProps) {
         {TOURNAMENT_DEFIS.map(defi => {
           const myPred = tournamentPreds[defi.type]
           const count = tournamentCounts[defi.type]
+          const votes = tournamentVotes[defi.type]
           const isEditing = editingTournament.has(defi.type)
           const isSaving = savingTournament === defi.type
           const showInput = !myPred || isEditing
+          const votesVisible = showVotes.has(defi.type)
 
           return (
             <div key={defi.type} className="card rounded-2xl p-5">
@@ -320,15 +319,37 @@ export default function DefisPage({ profile }: DefisPageProps) {
                 </div>
               )}
 
-              <div className="mt-3 pt-3 border-t border-gray-100">
+              <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
                 <span className="text-xs text-gray-400">
                   {count}/{leagueMemberCount} membres ont prédit
                 </span>
+                {count > 0 && (
+                  <button
+                    onClick={() => toggleVotes(defi.type)}
+                    className="text-xs text-gray-400 hover:text-primary transition"
+                  >
+                    {votesVisible ? 'Masquer les votes' : 'Voir les votes'}
+                  </button>
+                )}
               </div>
+
+              {votesVisible && votes.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {votes.map((v, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1">
+                      <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">
+                        {v.initials}
+                      </div>
+                      <span className="text-xs text-gray-500 min-w-0 truncate">{v.name}</span>
+                      <span className="text-xs font-semibold text-dark ml-auto shrink-0">{v.prediction}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
-        {!canEdit && !tournamentPreds.top_scorer && !tournamentPreds.top_assist && (
+        {!canEdit && TOURNAMENT_DEFIS.every(d => !tournamentPreds[d.type]) && (
           <p className="text-xs text-gray-400 italic px-1">Les prédictions de tournoi sont closes depuis le début de la compétition.</p>
         )}
       </div>

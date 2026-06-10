@@ -9,7 +9,7 @@ export interface Profile {
 export interface TournamentPrediction {
   id: string
   user_id: string
-  type: 'top_scorer' | 'top_assist'
+  type: 'top_scorer' | 'top_assist' | 'world_cup_winner' | 'worst_group_team' | 'top_scoring_team' | 'most_conceded_team'
   prediction: string
   is_correct: boolean
   created_at: string

@@ -47,13 +47,26 @@ export default function AdminPage() {
   const [updateProgress, setUpdateProgress] = useState('')
   const [tournamentPreds, setTournamentPreds] = useState<TournamentPredRow[]>([])
   const [tournamentProfiles, setTournamentProfiles] = useState<any[]>([])
-  const [actualWinnerInput, setActualWinnerInput] = useState({ top_scorer: '', top_assist: '' })
+  const [actualWinnerInput, setActualWinnerInput] = useState<Record<string, string>>({})
   const [validatingTournament, setValidatingTournament] = useState<string | null>(null)
   const [tournamentStatus, setTournamentStatus] = useState<StatusMsg | null>(null)
+  // Power-ups management
+  const [powerUpData, setPowerUpData] = useState<Array<{ user_id: string; full_name: string; avatar_initials: string; spy: number | string; double: number | string }>>([])
+  const [reloadingUserId, setReloadingUserId] = useState<string | null>(null)
+  const [reloadingAll, setReloadingAll] = useState(false)
+  // Bonus attribution
+  const [bonusUserId, setBonusUserId] = useState('')
+  const [bonusPoints, setBonusPoints] = useState('')
+  const [bonusReason, setBonusReason] = useState('')
+  const [grantingBonus, setGrantingBonus] = useState(false)
+  const [bonusLog, setBonusLog] = useState<any[]>([])
+  const [bonusStatus, setBonusStatus] = useState<StatusMsg | null>(null)
 
   useEffect(() => {
     fetchMatches()
     loadTournamentData()
+    loadPowerUpData()
+    loadBonusLog()
   }, [])
 
   async function fetchMatches() {
@@ -71,8 +84,79 @@ export default function AdminPage() {
     if (profilesRes.data) setTournamentProfiles(profilesRes.data)
   }
 
-  async function handleValidateTournament(type: 'top_scorer' | 'top_assist') {
-    const actual = actualWinnerInput[type].trim()
+  async function loadPowerUpData() {
+    const [profilesRes, pupsRes] = await Promise.all([
+      supabase.from('profiles').select('id, full_name, avatar_initials'),
+      supabase.from('power_ups').select('*'),
+    ])
+    const profiles = profilesRes.data || []
+    const pups = pupsRes.data || []
+    setPowerUpData(profiles.map((p: any) => ({
+      user_id: p.id,
+      full_name: p.full_name,
+      avatar_initials: p.avatar_initials,
+      spy: pups.find((pu: any) => pu.user_id === p.id && pu.type === 'spy')?.uses_remaining ?? '—',
+      double: pups.find((pu: any) => pu.user_id === p.id && pu.type === 'double')?.uses_remaining ?? '—',
+    })))
+  }
+
+  async function handleReloadPowerUps(userId: string) {
+    setReloadingUserId(userId)
+    await supabase.from('power_ups').upsert([
+      { user_id: userId, type: 'spy', uses_remaining: 3 },
+      { user_id: userId, type: 'double', uses_remaining: 3 },
+    ], { onConflict: 'user_id,type' })
+    await loadPowerUpData()
+    setReloadingUserId(null)
+  }
+
+  async function handleReloadAll() {
+    setReloadingAll(true)
+    const rows = powerUpData.flatMap(p => [
+      { user_id: p.user_id, type: 'spy', uses_remaining: 3 },
+      { user_id: p.user_id, type: 'double', uses_remaining: 3 },
+    ])
+    if (rows.length > 0) await supabase.from('power_ups').upsert(rows, { onConflict: 'user_id,type' })
+    await loadPowerUpData()
+    setReloadingAll(false)
+  }
+
+  async function loadBonusLog() {
+    const { data } = await supabase
+      .from('bonus_log')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10)
+    if (data) setBonusLog(data)
+  }
+
+  async function handleGrantBonus() {
+    const pts = parseInt(bonusPoints)
+    if (!bonusUserId || isNaN(pts) || pts === 0) return
+    setGrantingBonus(true)
+    setBonusStatus(null)
+
+    const targetProfile = tournamentProfiles.find((p: any) => p.id === bonusUserId)
+    const currentBonus = targetProfile?.bonus_points || 0
+    await supabase.from('profiles').update({ bonus_points: currentBonus + pts }).eq('id', bonusUserId)
+
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('bonus_log').insert({
+      user_id: bonusUserId, points: pts,
+      reason: bonusReason.trim() || null,
+      granted_by: user?.id || null,
+    })
+
+    await Promise.all([loadTournamentData(), loadBonusLog()])
+    const userName = targetProfile?.full_name || '?'
+    setBonusStatus({ type: 'success', message: `✓ ${pts > 0 ? '+' : ''}${pts} pts attribués à ${userName}` })
+    setBonusPoints('')
+    setBonusReason('')
+    setGrantingBonus(false)
+  }
+
+  async function handleValidateTournament(type: string) {
+    const actual = (actualWinnerInput[type] || '').trim()
     if (!actual) return
     setValidatingTournament(type)
     setTournamentStatus(null)
@@ -501,10 +585,15 @@ export default function AdminPage() {
 
         <div className="space-y-6">
           {([
-            { type: 'top_scorer' as const, icon: '🥇', label: 'Meilleur buteur' },
-            { type: 'top_assist' as const, icon: '🎯', label: 'Meilleur passeur' },
+            { type: 'world_cup_winner',    icon: '🏆', label: 'Vainqueur de la Coupe du Monde' },
+            { type: 'top_scorer',          icon: '🥇', label: 'Meilleur buteur' },
+            { type: 'top_assist',          icon: '🎯', label: 'Meilleur passeur' },
+            { type: 'top_scoring_team',    icon: '⚽', label: 'Équipe la plus prolifique' },
+            { type: 'most_conceded_team',  icon: '🥅', label: 'Équipe la plus poreuse' },
+            { type: 'worst_group_team',    icon: '😬', label: 'Pire équipe des poules' },
           ]).map(defi => {
             const preds = tournamentPreds.filter(p => p.type === defi.type)
+            const inputVal = actualWinnerInput[defi.type] || ''
             return (
               <div key={defi.type}>
                 <h3 className="text-sm font-semibold text-dark mb-3">{defi.icon} {defi.label}</h3>
@@ -535,24 +624,154 @@ export default function AdminPage() {
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={`Vrai ${defi.label.toLowerCase()}…`}
-                    value={actualWinnerInput[defi.type]}
+                    placeholder={`Vrai résultat…`}
+                    value={inputVal}
                     onChange={e => setActualWinnerInput(prev => ({ ...prev, [defi.type]: e.target.value }))}
                     className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
                   />
                   <button
                     onClick={() => handleValidateTournament(defi.type)}
-                    disabled={validatingTournament === defi.type || !actualWinnerInput[defi.type].trim()}
+                    disabled={validatingTournament === defi.type || !inputVal.trim()}
                     className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50"
                   >
-                    {validatingTournament === defi.type ? '…' : 'Valider les gagnants'}
+                    {validatingTournament === defi.type ? '…' : 'Valider'}
                   </button>
                 </div>
-                <p className="text-[11px] text-gray-400 mt-1.5">La comparaison ignore la casse. Seules les prédictions non encore validées sont traitées.</p>
+                <p className="text-[11px] text-gray-400 mt-1.5">Comparaison insensible à la casse · seules les prédictions non encore validées sont traitées.</p>
               </div>
             )
           })}
         </div>
+      </div>
+
+      {/* Power-ups management */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold text-dark flex items-center gap-2">⚡ Gestion des atouts</h2>
+          <button
+            onClick={handleReloadAll}
+            disabled={reloadingAll || powerUpData.length === 0}
+            className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-semibold hover:bg-primary/90 transition disabled:opacity-50"
+          >
+            {reloadingAll ? 'Rechargement…' : 'Recharger tous ×3'}
+          </button>
+        </div>
+
+        {powerUpData.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">Aucun atout initialisé. Les atouts se créent automatiquement à la première connexion de chaque joueur.</p>
+        ) : (
+          <div className="rounded-xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+            <div className="grid grid-cols-4 px-3 py-2 bg-gray-50">
+              <span className="text-xs font-semibold text-gray-400 col-span-2">Joueur</span>
+              <span className="text-xs font-semibold text-gray-400 text-center">🔍 Espion</span>
+              <span className="text-xs font-semibold text-gray-400 text-center">×2 Double</span>
+            </div>
+            {powerUpData.map(p => (
+              <div key={p.user_id} className="grid grid-cols-4 items-center px-3 py-2.5">
+                <div className="flex items-center gap-2 col-span-2 min-w-0">
+                  <div className="w-7 h-7 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-600 shrink-0">
+                    {p.avatar_initials}
+                  </div>
+                  <span className="text-sm text-dark truncate">{p.full_name}</span>
+                </div>
+                <div className="text-center">
+                  <span className={`text-sm font-semibold ${p.spy === 0 ? 'text-red-400' : 'text-dark'}`}>{p.spy}</span>
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <span className={`text-sm font-semibold ${p.double === 0 ? 'text-red-400' : 'text-dark'}`}>{p.double}</span>
+                  <button
+                    onClick={() => handleReloadPowerUps(p.user_id)}
+                    disabled={reloadingUserId === p.user_id}
+                    className="text-xs text-gray-400 hover:text-primary transition disabled:opacity-50"
+                    title="Recharger ×3"
+                  >
+                    {reloadingUserId === p.user_id ? '…' : '↺'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Bonus attribution */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h2 className="font-semibold text-dark mb-4 flex items-center gap-2">🎁 Attribution de points</h2>
+
+        {bonusStatus && (
+          <div className={`mb-4 flex items-center gap-2 text-sm border rounded-lg px-3 py-2 ${
+            bonusStatus.type === 'success' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-blue-50 border-blue-200 text-blue-800'
+          }`}>
+            {bonusStatus.type === 'success' ? <CheckCircle className="w-4 h-4 text-green-500 shrink-0" /> : <Info className="w-4 h-4 text-blue-500 shrink-0" />}
+            <span>{bonusStatus.message}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Joueur</label>
+            <select
+              value={bonusUserId}
+              onChange={e => setBonusUserId(e.target.value)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 bg-white"
+            >
+              <option value="">Choisir un joueur…</option>
+              {tournamentProfiles.map((p: any) => (
+                <option key={p.id} value={p.id}>{p.full_name} ({p.bonus_points || 0} pts bonus)</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Points (positif ou négatif)</label>
+            <input
+              type="number"
+              value={bonusPoints}
+              onChange={e => setBonusPoints(e.target.value)}
+              placeholder="Ex: 20 ou -5"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 mb-1 block">Raison (optionnel)</label>
+            <input
+              type="text"
+              value={bonusReason}
+              onChange={e => setBonusReason(e.target.value)}
+              placeholder="Ex: Défi meilleur buteur"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleGrantBonus}
+          disabled={grantingBonus || !bonusUserId || !bonusPoints || parseInt(bonusPoints) === 0 || isNaN(parseInt(bonusPoints))}
+          className="px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/90 transition disabled:opacity-50"
+        >
+          {grantingBonus ? 'Attribution…' : 'Attribuer les points'}
+        </button>
+
+        {bonusLog.length > 0 && (
+          <div className="mt-5">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">10 dernières attributions</h3>
+            <div className="rounded-xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+              {bonusLog.map((log: any) => {
+                const p = tournamentProfiles.find((pr: any) => pr.id === log.user_id)
+                return (
+                  <div key={log.id} className="flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm text-dark truncate">{p?.full_name || log.user_id.slice(0, 8)}</span>
+                      {log.reason && <span className="text-xs text-gray-400 truncate">— {log.reason}</span>}
+                    </div>
+                    <span className={`text-sm font-bold shrink-0 ${log.points > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {log.points > 0 ? '+' : ''}{log.points} pts
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
